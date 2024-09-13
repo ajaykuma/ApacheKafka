@@ -1,0 +1,18 @@
+Refer: github project for variants/setup of tools etc
+https://github.com/ajaykuma/kubernetes-kafka
+
+To work on this> to be updated..
+
+
+
+
+
+
+
+
+
+
+
+
+$kubernetes cheat sheet
+https://kubernetes.io/docs/reference/kubectl/cheatsheet/

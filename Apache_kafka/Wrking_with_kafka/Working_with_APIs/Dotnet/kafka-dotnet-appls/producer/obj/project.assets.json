@@ -1,0 +1,321 @@
+{
+  "version": 3,
+  "targets": {
+    "net8.0": {
+      "Confluent.Kafka/2.3.0": {
+        "type": "package",
+        "dependencies": {
+          "System.Memory": "4.5.0",
+          "librdkafka.redist": "2.3.0"
+        },
+        "compile": {
+          "lib/net6.0/Confluent.Kafka.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net6.0/Confluent.Kafka.dll": {
+            "related": ".xml"
+          }
+        }
+      },
+      "librdkafka.redist/2.3.0": {
+        "type": "package",
+        "build": {
+          "build/_._": {}
+        },
+        "runtimeTargets": {
+          "runtimes/linux-arm64/native/librdkafka.so": {
+            "assetType": "native",
+            "rid": "linux-arm64"
+          },
+          "runtimes/linux-x64/native/alpine-librdkafka.so": {
+            "assetType": "native",
+            "rid": "linux-x64"
+          },
+          "runtimes/linux-x64/native/centos6-librdkafka.so": {
+            "assetType": "native",
+            "rid": "linux-x64"
+          },
+          "runtimes/linux-x64/native/centos7-librdkafka.so": {
+            "assetType": "native",
+            "rid": "linux-x64"
+          },
+          "runtimes/linux-x64/native/librdkafka.so": {
+            "assetType": "native",
+            "rid": "linux-x64"
+          },
+          "runtimes/osx-arm64/native/librdkafka.dylib": {
+            "assetType": "native",
+            "rid": "osx-arm64"
+          },
+          "runtimes/osx-x64/native/librdkafka.dylib": {
+            "assetType": "native",
+            "rid": "osx-x64"
+          },
+          "runtimes/win-x64/native/libcrypto-3-x64.dll": {
+            "assetType": "native",
+            "rid": "win-x64"
+          },
+          "runtimes/win-x64/native/libcurl.dll": {
+            "assetType": "native",
+            "rid": "win-x64"
+          },
+          "runtimes/win-x64/native/librdkafka.dll": {
+            "assetType": "native",
+            "rid": "win-x64"
+          },
+          "runtimes/win-x64/native/librdkafkacpp.dll": {
+            "assetType": "native",
+            "rid": "win-x64"
+          },
+          "runtimes/win-x64/native/libssl-3-x64.dll": {
+            "assetType": "native",
+            "rid": "win-x64"
+          },
+          "runtimes/win-x64/native/msvcp140.dll": {
+            "assetType": "native",
+            "rid": "win-x64"
+          },
+          "runtimes/win-x64/native/vcruntime140.dll": {
+            "assetType": "native",
+            "rid": "win-x64"
+          },
+          "runtimes/win-x64/native/zlib1.dll": {
+            "assetType": "native",
+            "rid": "win-x64"
+          },
+          "runtimes/win-x64/native/zstd.dll": {
+            "assetType": "native",
+            "rid": "win-x64"
+          },
+          "runtimes/win-x86/native/libcrypto-3.dll": {
+            "assetType": "native",
+            "rid": "win-x86"
+          },
+          "runtimes/win-x86/native/libcurl.dll": {
+            "assetType": "native",
+            "rid": "win-x86"
+          },
+          "runtimes/win-x86/native/librdkafka.dll": {
+            "assetType": "native",
+            "rid": "win-x86"
+          },
+          "runtimes/win-x86/native/librdkafkacpp.dll": {
+            "assetType": "native",
+            "rid": "win-x86"
+          },
+          "runtimes/win-x86/native/libssl-3.dll": {
+            "assetType": "native",
+            "rid": "win-x86"
+          },
+          "runtimes/win-x86/native/msvcp140.dll": {
+            "assetType": "native",
+            "rid": "win-x86"
+          },
+          "runtimes/win-x86/native/vcruntime140.dll": {
+            "assetType": "native",
+            "rid": "win-x86"
+          },
+          "runtimes/win-x86/native/zlib1.dll": {
+            "assetType": "native",
+            "rid": "win-x86"
+          },
+          "runtimes/win-x86/native/zstd.dll": {
+            "assetType": "native",
+            "rid": "win-x86"
+          }
+        }
+      },
+      "System.Memory/4.5.0": {
+        "type": "package",
+        "compile": {
+          "ref/netcoreapp2.1/_._": {}
+        },
+        "runtime": {
+          "lib/netcoreapp2.1/_._": {}
+        }
+      }
+    }
+  },
+  "libraries": {
+    "Confluent.Kafka/2.3.0": {
+      "sha512": "JSBXN/X7bBNS92bgZp82v1oT58kw9ndpKSGC5VgELeM/HgXUTssFkG3gEPEGd3cOIa5MMJSLe6+gYwzzjdAJPw==",
+      "type": "package",
+      "path": "confluent.kafka/2.3.0",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "confluent.kafka.2.3.0.nupkg.sha512",
+        "confluent.kafka.nuspec",
+        "lib/net462/Confluent.Kafka.dll",
+        "lib/net462/Confluent.Kafka.xml",
+        "lib/net6.0/Confluent.Kafka.dll",
+        "lib/net6.0/Confluent.Kafka.xml",
+        "lib/netstandard1.3/Confluent.Kafka.dll",
+        "lib/netstandard1.3/Confluent.Kafka.xml",
+        "lib/netstandard2.0/Confluent.Kafka.dll",
+        "lib/netstandard2.0/Confluent.Kafka.xml"
+      ]
+    },
+    "librdkafka.redist/2.3.0": {
+      "sha512": "pH5zFZ0S56Wl6UfRkmDJN2AjHlPdVxlTskncFnL27LLGQuuY2dAU8YrZBkduBOws4tURS2TaTp1aPsY3qeJ0bw==",
+      "type": "package",
+      "path": "librdkafka.redist/2.3.0",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "CONFIGURATION.md",
+        "LICENSES.txt",
+        "README.md",
+        "build/librdkafka.redist.props",
+        "build/native/include/librdkafka/rdkafka.h",
+        "build/native/include/librdkafka/rdkafka_mock.h",
+        "build/native/include/librdkafka/rdkafkacpp.h",
+        "build/native/lib/win/x64/win-x64-Release/v142/librdkafka.lib",
+        "build/native/lib/win/x64/win-x64-Release/v142/librdkafkacpp.lib",
+        "build/native/lib/win/x86/win-x86-Release/v142/librdkafka.lib",
+        "build/native/lib/win/x86/win-x86-Release/v142/librdkafkacpp.lib",
+        "build/native/librdkafka.redist.targets",
+        "librdkafka.redist.2.3.0.nupkg.sha512",
+        "librdkafka.redist.nuspec",
+        "runtimes/linux-arm64/native/librdkafka.so",
+        "runtimes/linux-x64/native/alpine-librdkafka.so",
+        "runtimes/linux-x64/native/centos6-librdkafka.so",
+        "runtimes/linux-x64/native/centos7-librdkafka.so",
+        "runtimes/linux-x64/native/librdkafka.so",
+        "runtimes/osx-arm64/native/librdkafka.dylib",
+        "runtimes/osx-x64/native/librdkafka.dylib",
+        "runtimes/win-x64/native/libcrypto-3-x64.dll",
+        "runtimes/win-x64/native/libcurl.dll",
+        "runtimes/win-x64/native/librdkafka.dll",
+        "runtimes/win-x64/native/librdkafkacpp.dll",
+        "runtimes/win-x64/native/libssl-3-x64.dll",
+        "runtimes/win-x64/native/msvcp140.dll",
+        "runtimes/win-x64/native/vcruntime140.dll",
+        "runtimes/win-x64/native/zlib1.dll",
+        "runtimes/win-x64/native/zstd.dll",
+        "runtimes/win-x86/native/libcrypto-3.dll",
+        "runtimes/win-x86/native/libcurl.dll",
+        "runtimes/win-x86/native/librdkafka.dll",
+        "runtimes/win-x86/native/librdkafkacpp.dll",
+        "runtimes/win-x86/native/libssl-3.dll",
+        "runtimes/win-x86/native/msvcp140.dll",
+        "runtimes/win-x86/native/vcruntime140.dll",
+        "runtimes/win-x86/native/zlib1.dll",
+        "runtimes/win-x86/native/zstd.dll"
+      ]
+    },
+    "System.Memory/4.5.0": {
+      "sha512": "m0psCSpUxTGfvwyO0i03ajXVhgBqyXlibXz0Mo1dtKGjaHrXFLnuQ8rNBTmWRqbfRjr4eC6Wah4X5FfuFDu5og==",
+      "type": "package",
+      "path": "system.memory/4.5.0",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "LICENSE.TXT",
+        "THIRD-PARTY-NOTICES.TXT",
+        "lib/MonoAndroid10/_._",
+        "lib/MonoTouch10/_._",
+        "lib/netcoreapp2.1/_._",
+        "lib/netstandard1.1/System.Memory.dll",
+        "lib/netstandard1.1/System.Memory.xml",
+        "lib/netstandard2.0/System.Memory.dll",
+        "lib/netstandard2.0/System.Memory.xml",
+        "lib/uap10.0.16300/_._",
+        "lib/xamarinios10/_._",
+        "lib/xamarinmac20/_._",
+        "lib/xamarintvos10/_._",
+        "lib/xamarinwatchos10/_._",
+        "ref/MonoAndroid10/_._",
+        "ref/MonoTouch10/_._",
+        "ref/netcoreapp2.1/_._",
+        "ref/netstandard1.1/System.Memory.dll",
+        "ref/netstandard1.1/System.Memory.xml",
+        "ref/netstandard2.0/System.Memory.dll",
+        "ref/netstandard2.0/System.Memory.xml",
+        "ref/uap10.0.16300/_._",
+        "ref/xamarinios10/_._",
+        "ref/xamarinmac20/_._",
+        "ref/xamarintvos10/_._",
+        "ref/xamarinwatchos10/_._",
+        "system.memory.4.5.0.nupkg.sha512",
+        "system.memory.nuspec",
+        "useSharedDesignerContext.txt",
+        "version.txt"
+      ]
+    }
+  },
+  "projectFileDependencyGroups": {
+    "net8.0": [
+      "Confluent.Kafka >= 2.3.0"
+    ]
+  },
+  "packageFolders": {
+    "C:\\Users\\Ajay\\.nuget\\packages\\": {}
+  },
+  "project": {
+    "version": "1.0.0",
+    "restore": {
+      "projectUniqueName": "D:\\GitContent\\ApacheKafka\\ApacheKafka\\Apache_kafka\\Wrking_with_kafka\\Working_with_APIs\\Dotnet\\kafka-dotnet-appls\\producer\\producer.csproj",
+      "projectName": "producer",
+      "projectPath": "D:\\GitContent\\ApacheKafka\\ApacheKafka\\Apache_kafka\\Wrking_with_kafka\\Working_with_APIs\\Dotnet\\kafka-dotnet-appls\\producer\\producer.csproj",
+      "packagesPath": "C:\\Users\\Ajay\\.nuget\\packages\\",
+      "outputPath": "D:\\GitContent\\ApacheKafka\\ApacheKafka\\Apache_kafka\\Wrking_with_kafka\\Working_with_APIs\\Dotnet\\kafka-dotnet-appls\\producer\\obj\\",
+      "projectStyle": "PackageReference",
+      "configFilePaths": [
+        "C:\\Users\\Ajay\\AppData\\Roaming\\NuGet\\NuGet.Config"
+      ],
+      "originalTargetFrameworks": [
+        "netcoreapp8.0"
+      ],
+      "sources": {
+        "https://api.nuget.org/v3/index.json": {}
+      },
+      "frameworks": {
+        "net8.0": {
+          "targetAlias": "netcoreapp8.0",
+          "projectReferences": {}
+        }
+      },
+      "warningProperties": {
+        "warnAsError": [
+          "NU1605"
+        ]
+      },
+      "restoreAuditProperties": {
+        "enableAudit": "true",
+        "auditLevel": "low",
+        "auditMode": "direct"
+      }
+    },
+    "frameworks": {
+      "net8.0": {
+        "targetAlias": "netcoreapp8.0",
+        "dependencies": {
+          "Confluent.Kafka": {
+            "target": "Package",
+            "version": "[2.3.0, )"
+          }
+        },
+        "imports": [
+          "net461",
+          "net462",
+          "net47",
+          "net471",
+          "net472",
+          "net48",
+          "net481"
+        ],
+        "assetTargetFallback": true,
+        "warn": true,
+        "frameworkReferences": {
+          "Microsoft.NETCore.App": {
+            "privateAssets": "all"
+          }
+        },
+        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\8.0.401/PortableRuntimeIdentifierGraph.json"
+      }
+    }
+  }
+}

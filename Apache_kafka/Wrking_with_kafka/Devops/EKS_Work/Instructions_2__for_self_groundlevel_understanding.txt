@@ -1,0 +1,35 @@
+Using console: deploying k8s cluster
+-------------------------
+Highlevel Steps:
+#Install & Configure AWS CLI
+-Install AWS CLI
+-Configure AWS CLI
+- Test cli access
+#Install & Configure kubectl
+-Test kubectl access
+
+--login to AWS portal
+--create default VPC not existing (this will have default subnets in all availability zones)
+--check if vpc and subnets created
+--create EKS role (say: test-EKS-role + additional policy < associated to the user)
+
+#Setup EKS Cluster Master Node
+-login to AWS portal
+-Create Kubernetes cluster (using default settings and version same as for kubectl)
+-Look into cluster configurations
+-Review and create the cluster
+
+
+#Setup the kubectl configuration
+
+Create EKS(Kubernetes) worker nodes
+-Setup worker nodes in EKS
+-Verifying worker node status from kubectl
+
+-Delete EKS Cluster
+-Delete Worker nodes
+-Delete Master node
+-Delete Key pair
+-Delete IAM roles
+
+====================

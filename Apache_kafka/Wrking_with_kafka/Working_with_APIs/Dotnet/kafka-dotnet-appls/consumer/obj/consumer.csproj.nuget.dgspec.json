@@ -1,0 +1,72 @@
+{
+  "format": 1,
+  "restore": {
+    "D:\\GitContent\\ApacheKafka\\ApacheKafka\\Apache_kafka\\Wrking_with_kafka\\Working_with_APIs\\Dotnet\\kafka-dotnet-appls\\consumer\\consumer.csproj": {}
+  },
+  "projects": {
+    "D:\\GitContent\\ApacheKafka\\ApacheKafka\\Apache_kafka\\Wrking_with_kafka\\Working_with_APIs\\Dotnet\\kafka-dotnet-appls\\consumer\\consumer.csproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "D:\\GitContent\\ApacheKafka\\ApacheKafka\\Apache_kafka\\Wrking_with_kafka\\Working_with_APIs\\Dotnet\\kafka-dotnet-appls\\consumer\\consumer.csproj",
+        "projectName": "consumer",
+        "projectPath": "D:\\GitContent\\ApacheKafka\\ApacheKafka\\Apache_kafka\\Wrking_with_kafka\\Working_with_APIs\\Dotnet\\kafka-dotnet-appls\\consumer\\consumer.csproj",
+        "packagesPath": "C:\\Users\\Ajay\\.nuget\\packages\\",
+        "outputPath": "D:\\GitContent\\ApacheKafka\\ApacheKafka\\Apache_kafka\\Wrking_with_kafka\\Working_with_APIs\\Dotnet\\kafka-dotnet-appls\\consumer\\obj\\",
+        "projectStyle": "PackageReference",
+        "configFilePaths": [
+          "C:\\Users\\Ajay\\AppData\\Roaming\\NuGet\\NuGet.Config"
+        ],
+        "originalTargetFrameworks": [
+          "netcoreapp8.0"
+        ],
+        "sources": {
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "net8.0": {
+            "targetAlias": "netcoreapp8.0",
+            "projectReferences": {}
+          }
+        },
+        "warningProperties": {
+          "warnAsError": [
+            "NU1605"
+          ]
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        }
+      },
+      "frameworks": {
+        "net8.0": {
+          "targetAlias": "netcoreapp8.0",
+          "dependencies": {
+            "Confluent.Kafka": {
+              "target": "Package",
+              "version": "[2.3.0, )"
+            }
+          },
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48",
+            "net481"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "frameworkReferences": {
+            "Microsoft.NETCore.App": {
+              "privateAssets": "all"
+            }
+          },
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\8.0.401/PortableRuntimeIdentifierGraph.json"
+        }
+      }
+    }
+  }
+}

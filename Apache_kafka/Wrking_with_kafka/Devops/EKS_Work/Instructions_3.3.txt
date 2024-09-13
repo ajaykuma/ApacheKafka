@@ -1,0 +1,38 @@
+#Deploying official kubernetes dashboard
+$export DASHBOARD_VERSION="v2.0.0"
+$kubectl apply -f https://raw.githubusercontent.com/kubernetes/dashboard/${DASHBOARD_VERSION}/aio/deploy/recommended.yaml
+
+
+#Since this is deployed to our private cluster, we need to access it via a proxy. kube-proxy is 
+available to proxy our requests to the dashboard service. 
+In your workspace, run the following command:
+
+$kubectl proxy --port=8080 --address=0.0.0.0 --disable-filter=true &
+$jobs
+#This will start the proxy, listen on port 8080, listen on all interfaces, 
+and will disable the filtering of non-localhost requests.
+#This command will continue to run in the background of the current terminal’s session.
+#access the Kubernetes Dashboard
+
+#In your Cloud9 environment, click Tools / Preview / Preview Running Application
+#Scroll to the end of the URL and append:
+
+/api/v1/namespaces/kubernetes-dashboard/services/https:kubernetes-dashboard:/proxy/
+<enter>
+--open this into a new browser
+--get the token to login
+$aws eks get-token --cluster-name ekswork-eksctl | jq -r '.status.token'
+
+#Cleanup
+# kill proxy
+pkill -f 'kubectl proxy --port=8080'
+
+$fg
+
+# delete dashboard
+kubectl delete -f https://raw.githubusercontent.com/kubernetes/dashboard/${DASHBOARD_VERSION}/aio/deploy/recommended.yaml
+unset DASHBOARD_VERSION
+
+
+
+

@@ -1,0 +1,48 @@
+Create directory or copy from Git 'kafka-dotnet-appls'
+mkdir kafka-dotnet-appls
+mkdir kafka-dotnet-appls/producer
+mkdir kafka-dotnet-appls/consumer
+
+cd kafka-dotnet-appls/producer
+
+--create producer.csproj
+--create producer.cs
+
+cd kafka-dotnet-appls/consumer
+--create consumer.csproj
+--create consumer.cs
+
+edit producer.cs and consumer.cs as per requirements
+
+--update ProducerConfigs in 'producer.cs'
+ex: BootstrapServers, topic etc..
+
+#https://www.linode.com/docs/guides/install-dotnet-on-ubuntu/
+#install dotnet on ubuntu
+sudo apt install dotnet8
+
+You can test the syntax before preceding by compiling with
+cd kafka-dotnet-appls/producer
+dotnet build producer.csproj
+
+--update ConsumerConfigs in 'consumer.cs'
+ex: BootstrapServers, topic etc..
+cd kafka-dotnet-appls/consumer
+dotnet build consumer.csproj
+
+cd producer
+dotnet run
+
+cd consumer
+dotnet run
+
+For more details:
+https://docs.confluent.io/kafka-clients/dotnet/current/overview.html#dotnet-example-code
+https://docs.axual.io/axual/2024.2/self-service/applications/consumer/dotnet/dotnet-kafka-client-consumer.html
+
+===================
+#AdminClient
+https://docs.confluent.io/platform/current/clients/confluent-kafka-dotnet/_site/api/Confluent.Kafka.IAdminClient.html
+https://github.com/confluentinc/confluent-kafka-dotnet/tree/master/examples/AdminClient
+
+

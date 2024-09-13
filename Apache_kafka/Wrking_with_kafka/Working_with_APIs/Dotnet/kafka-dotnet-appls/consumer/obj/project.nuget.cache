@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "dgSpecHash": "VlJRJhHbMQw=",
+  "success": true,
+  "projectFilePath": "D:\\GitContent\\ApacheKafka\\ApacheKafka\\Apache_kafka\\Wrking_with_kafka\\Working_with_APIs\\Dotnet\\kafka-dotnet-appls\\consumer\\consumer.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\Ajay\\.nuget\\packages\\confluent.kafka\\2.3.0\\confluent.kafka.2.3.0.nupkg.sha512",
+    "C:\\Users\\Ajay\\.nuget\\packages\\librdkafka.redist\\2.3.0\\librdkafka.redist.2.3.0.nupkg.sha512",
+    "C:\\Users\\Ajay\\.nuget\\packages\\system.memory\\4.5.0\\system.memory.4.5.0.nupkg.sha512"
+  ],
+  "logs": []
+}

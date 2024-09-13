@@ -1,0 +1,84 @@
+{
+  "format": 1,
+  "restore": {
+    "D:\\GitContent\\ApacheKafka\\ApacheKafka\\Apache_kafka\\Wrking_with_kafka\\Working_with_APIs\\Dotnet\\kafka-dotnet-appls\\AdminClient1\\AdminClient.csproj": {}
+  },
+  "projects": {
+    "D:\\GitContent\\ApacheKafka\\ApacheKafka\\Apache_kafka\\Wrking_with_kafka\\Working_with_APIs\\Dotnet\\kafka-dotnet-appls\\AdminClient1\\AdminClient.csproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "D:\\GitContent\\ApacheKafka\\ApacheKafka\\Apache_kafka\\Wrking_with_kafka\\Working_with_APIs\\Dotnet\\kafka-dotnet-appls\\AdminClient1\\AdminClient.csproj",
+        "projectName": "AdminClient",
+        "projectPath": "D:\\GitContent\\ApacheKafka\\ApacheKafka\\Apache_kafka\\Wrking_with_kafka\\Working_with_APIs\\Dotnet\\kafka-dotnet-appls\\AdminClient1\\AdminClient.csproj",
+        "packagesPath": "C:\\Users\\Ajay\\.nuget\\packages\\",
+        "outputPath": "D:\\GitContent\\ApacheKafka\\ApacheKafka\\Apache_kafka\\Wrking_with_kafka\\Working_with_APIs\\Dotnet\\kafka-dotnet-appls\\AdminClient1\\obj\\",
+        "projectStyle": "PackageReference",
+        "configFilePaths": [
+          "C:\\Users\\Ajay\\AppData\\Roaming\\NuGet\\NuGet.Config"
+        ],
+        "originalTargetFrameworks": [
+          "net6.0"
+        ],
+        "sources": {
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "net6.0": {
+            "targetAlias": "net6.0",
+            "projectReferences": {}
+          }
+        },
+        "warningProperties": {
+          "warnAsError": [
+            "NU1605"
+          ]
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        }
+      },
+      "frameworks": {
+        "net6.0": {
+          "targetAlias": "net6.0",
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48",
+            "net481"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "downloadDependencies": [
+            {
+              "name": "Microsoft.AspNetCore.App.Ref",
+              "version": "[6.0.33, 6.0.33]"
+            },
+            {
+              "name": "Microsoft.NETCore.App.Host.win-x64",
+              "version": "[6.0.33, 6.0.33]"
+            },
+            {
+              "name": "Microsoft.NETCore.App.Ref",
+              "version": "[6.0.33, 6.0.33]"
+            },
+            {
+              "name": "Microsoft.WindowsDesktop.App.Ref",
+              "version": "[6.0.33, 6.0.33]"
+            }
+          ],
+          "frameworkReferences": {
+            "Microsoft.NETCore.App": {
+              "privateAssets": "all"
+            }
+          },
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\8.0.401\\RuntimeIdentifierGraph.json"
+        }
+      }
+    }
+  }
+}
