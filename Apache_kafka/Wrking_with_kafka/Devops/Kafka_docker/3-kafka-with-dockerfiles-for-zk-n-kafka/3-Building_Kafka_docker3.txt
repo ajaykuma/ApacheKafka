@@ -1,0 +1,5 @@
+#Building kafka & zookeeper images separately using separate 'Dockerfile' and 
+running them in 2 different containers
+#This can be easily achieved using 'docker-compose' , however using 'Dockerfile' needs additional steps in order to let containers communicate with each other
+
+'3-kafka-with-dockerfiles-for-zk-n-kafka'

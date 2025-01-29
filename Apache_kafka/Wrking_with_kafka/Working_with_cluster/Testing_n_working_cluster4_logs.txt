@@ -1,0 +1,81 @@
+#Understanding Logs
+
+--When broker starts some files are created within kafka folder, i.e. in our case .../usr/local/kafka/kafka-logs1
+  as specified in <kafkapath>/server.properties file
+
+[hdu@c1 ~]$ ls /usr/local/kafka/kafka-logs1/
+cleaner-offset-checkpoint  __consumer_offsets-24  __consumer_offsets-39  log-start-offset-checkpoint       Topich1-2
+__consumer_offsets-0       __consumer_offsets-27  __consumer_offsets-42  meta.properties                   Topic2-0
+__consumer_offsets-12      __consumer_offsets-3   __consumer_offsets-45  recovery-point-offset-checkpoint  Topic2-1
+__consumer_offsets-15      __consumer_offsets-30  __consumer_offsets-48  replication-offset-checkpoint     Topic2-2
+__consumer_offsets-18      __consumer_offsets-33  __consumer_offsets-6   Topich1-0                          Topic3-0
+__consumer_offsets-21      __consumer_offsets-36  __consumer_offsets-9   Topich1-1                          Topic3-1
+
+#Topic related directories to contain the data i.e. segment files.
+Other files are
+-cleaner-offset-checkpoint
+-log-start-offset-checkpoint
+-meta.properties
+-recovery-point-offset-checkpoint
+-replication-offset-checkpoint
+
+--these files would be empty as of now
+
+--For each partition of topic we have additional files
+xxxxx.index
+xxxxx.log
+xxxxx.timeindex
+leader-epoch-checkpoint
+
+xxxxx.log ---> first log segment file
+
+--push some data into this index
+--refresh to check if data was pushed into topic
+
+#Notes:
+--Every log composing a partition (usually there will be a single one) is composed of multiple segments, ordered from the oldest
+  to the most recent ones. Every segment has its data file where all records are stored and in addition to it,
+  it also has 3 different indexes. 
+--Aborted transactions index takes care of records visibility during the transaction.
+--Timestamp index is a mapping between records timestamps and their positions whereas 
+--offset index is the mapping between offsets and their positions in the files.
+The entries in the indexes aren't added for every single record added to the log. The frequency of updates is controlled by
+index.interval.bytes property which by default is 4096. It means that Apache Kafka will add new entries to the offset and
+timestamp indexes every 4096 bytes.
+
+--as partition starts receiving data/messages, these are stored in 'segment-0' or first segment file until
+  the segment limit is reached. Once limit is reached the segment file is closed and new segment is created
+  max segement size : 1 week data /1 gb 
+--Each kafka message is uniquely identified by 64 bit integer offset
+--Numbering of offset continues across segments
+segment0-msg1:M-0000
+segment0-msg2:M-0001
+segment0-msg3:M-0002
+....
+segment0-msg30652:M-30652
+segment1-msg30651:M-30653
+...
+--This ensures the offset is unique within the partition
+--Note** Segment file name is suffixed by the first offset in that segment.
+
+--To locate messages we need Topic name + partition number + offset number
+--in Stream processing application,messages are read in sequence per partition
+
+--To help brokers find the message at an offset, kafka maintains an index of offset (xxxx.index)
+--the index files are also segmented, stored with log files per partition
+
+--when seeking messages based on timestamp, kafka maintains a timestamp for each message and builds a timeindex.
+--the timeindex files are also segmented, stored with log files per partition
+
+
+#looking to timeindex log
+C:\Users\Wich10\Downloads\kafka\kafka_2.11-2.2.1\bin\windows>kafka-dump-log.bat --files C:\Users\Wich10\Downloads\Java\Kafka_Prod_Consu_for_string2\Kafka_Project\tmp\kafka-logs1\Test1-0\00000000000000000000.timeindex
+
+
+
+
+
+
+
+
+

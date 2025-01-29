@@ -1,0 +1,141 @@
+--sample output--
+root@m1:~/kafka-installation5# vi DockerFile
+root@m1:~/kafka-installation5# vi start.sh
+root@m1:~/kafka-installation5# chmod -R 755 start.sh 
+root@m1:~/kafka-installation5# vi start.sh
+root@m1:~/kafka-installation5# vi DockerFile
+
+root@m1:~/kafka-installation5# docker build . -t kafka:2.11-2.2.1
+Sending build context to Docker daemon  3.072kB
+Step 1/5 : FROM openjdk:8
+8: Pulling from library/openjdk
+627b765e08d1: Pull complete 
+c040670e5e55: Pull complete 
+073a180f4992: Pull complete 
+bf76209566d0: Pull complete 
+f10db7ba7580: Pull complete 
+5e5dee180760: Pull complete 
+c26c02f721c2: Pull complete 
+Digest: sha256:4c7bc9c7251af1d96ccfb80207576f3144994c17a3f0df3d4888a7bdb6df9de6
+Status: Downloaded newer image for openjdk:8
+ ---> f67a59e543c1
+Step 2/5 : RUN cd /opt && curl -OL http://archive.apache.org/dist/kafka/2.2.1/kafka_2.11-2.2.1.tgz && tar -zxvf kafka_2.11-2.2.1.tgz && rm kafka_2.11-2.2.1.tgz
+ ---> Running in b689cd000d04
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+100 61.0M  100 61.0M    0     0  2841k      0  0:00:22  0:00:22 --:--:-- 2791k
+kafka_2.11-2.2.1/
+...
+
+kafka_2.11-2.2.1/libs/kafka-streams-test-utils-2.2.1.jar
+kafka_2.11-2.2.1/libs/kafka-streams-examples-2.2.1.jar
+Removing intermediate container b689cd000d04
+ ---> b62fc266d31c
+Step 3/5 : WORKDIR /opt/kafka_2.11-2.2.1/
+ ---> Running in 0eef92931aa2
+Removing intermediate container 0eef92931aa2
+ ---> a7543e0b02ca
+Step 4/5 : COPY start.sh /opt/kafka_2.11-2.2.1/
+ ---> 4a418e5f5cb1
+Step 5/5 : CMD ["./start.sh"]
+ ---> Running in 1ad5174a3974
+Removing intermediate container 1ad5174a3974
+ ---> 77d1a09f757f
+Successfully built 77d1a09f757f
+Successfully tagged kafka:2.11-2.2.1
+
+root@m1:~/kafka-installation5# ls
+Dockerfile  start.sh
+
+root@m1:~/kafka-installation5# docker images
+REPOSITORY               TAG          IMAGE ID       CREATED         SIZE
+kafka                    2.11-2.2.1   77d1a09f757f   3 minutes ago   583MB
+openjdk                  latest       c9022ce77bf9   2 days ago      467MB
+openjdk                  8            f67a59e543c1   3 days ago      514MB
+wurstmeister/kafka       latest       c3b059ede60e   6 weeks ago     507MB
+hello-world              latest       d1165f221234   4 months ago    13.3kB
+wurstmeister/zookeeper   latest       3f43f72cb283   2 years ago     510MB
+
+root@m1:~/kafka-installation5# docker container ls
+CONTAINER ID   IMAGE     COMMAND   CREATED   STATUS    PORTS     NAMES
+
+root@m1:~/kafka-installation5# docker images 
+REPOSITORY               TAG          IMAGE ID       CREATED          SIZE
+kafka                    2.11-2.2.1   77d1a09f757f   29 minutes ago   583MB
+openjdk                  latest       c9022ce77bf9   2 days ago       467MB
+openjdk                  8            f67a59e543c1   3 days ago       514MB
+wurstmeister/kafka       latest       c3b059ede60e   6 weeks ago      507MB
+hello-world              latest       d1165f221234   4 months ago     13.3kB
+wurstmeister/zookeeper   latest       3f43f72cb283   2 years ago      510MB
+
+root@m1:~/kafka-installation5# docker run -d --name kafka-broker kafka:2.11-2.2.1
+docker: Error response from daemon: Conflict. The container name "/kafka-broker" is already in use by container "6db43842ab12be4fa4a3d623be493e639c9abafb7a7a403077ee9b144001ebfe". You have to remove (or rename) that container to be able to reuse that name.
+See 'docker run --help'.
+
+root@m1:~/kafka-installation5# docker rm /kafka-broker
+/kafka-broker
+
+root@m1:~/kafka-installation5# docker container ls
+CONTAINER ID   IMAGE     COMMAND   CREATED   STATUS    PORTS     NAMES
+
+root@m1:~/kafka-installation5# docker run -d --name kafka-broker kafka:2.11-2.2.1 
+6db43842ab12be4fa4a3d623be493e639c9abafb7a7a403077ee9b144001ebfe
+
+root@m1:~/kafka-installation5# docker container ls
+CONTAINER ID   IMAGE              COMMAND        CREATED         STATUS         PORTS     NAMES
+6db43842ab12   kafka:2.11-2.2.1   "./start.sh"   5 seconds ago   Up 4 seconds             kafka-broker
+
+root@m1:~/kafka-installation5# docker exec -it kafka-broker /bin/sh
+	# ls
+	LICENSE  NOTICE  bin  config  libs  logs  site-docs  start.sh
+
+	# ls logs
+	controller.log	kafka-authorizer.log  kafka-request.log  kafkaServer-gc.log.0.current  log-cleaner.log	server.log  state-change.log  zookeeper-gc.log.0.current
+
+	# ls bin
+connect-distributed.sh	      kafka-consumer-groups.sh	   kafka-preferred-replica-election.sh	kafka-streams-application-reset.sh  zookeeper-server-start.sh
+connect-standalone.sh	      kafka-consumer-perf-test.sh  kafka-producer-perf-test.sh		kafka-topics.sh			    zookeeper-server-stop.sh
+kafka-acls.sh		      kafka-delegation-tokens.sh   kafka-reassign-partitions.sh		kafka-verifiable-consumer.sh	    zookeeper-shell.sh
+kafka-broker-api-versions.sh  kafka-delete-records.sh	   kafka-replica-verification.sh	kafka-verifiable-producer.sh
+kafka-configs.sh	      kafka-dump-log.sh		   kafka-run-class.sh			trogdor.sh
+kafka-console-consumer.sh     kafka-log-dirs.sh		   kafka-server-start.sh		windows
+kafka-console-producer.sh     kafka-mirror-maker.sh	   kafka-server-stop.sh			zookeeper-security-migration.sh
+
+	# ls config
+connect-console-sink.properties    connect-file-sink.properties    connect-standalone.properties  producer.properties	  trogdor.conf
+connect-console-source.properties  connect-file-source.properties  consumer.properties		  server.properties	  zookeeper.properties
+connect-distributed.properties	   connect-log4j.properties	   log4j.properties		  tools-log4j.properties
+
+	# bin/kafka-topics.sh --list --bootstrap-server localhost:9092
+
+	#exit
+
+#Running commands using a temporary container,linked with existing kafka container
+root@m1:~/kafka-installation5# docker run --rm -it --link kafka-broker --name temp1 kafka:2.11-2.2.1 bin/kafka-topics.sh --create --bootstrap-server kafka-broker:9092 --replication-factor 1 --partitions 1 --topic newtopic1
+
+root@m1:~/kafka-installation5# docker run --rm -it --link kafka-broker --name temp1 kafka:2.11-2.2.1 bin/kafka-topics.sh --create --bootstrap-server kafka-broker:9092 --replication-factor 1 --partitions 1 --topic newtopic2
+
+root@m1:~/kafka-installation5# docker run --rm -it --link kafka-broker --name temp1 kafka:2.11-2.2.1 bin/kafka-topics.sh --list --bootstrap-server kafka-broker:9092
+newtopic1
+newtopic2
+
+#running producer
+root@m1:~/kafka-installation5# docker run --rm -it --link kafka-broker --name producer kafka:2.11-2.2.1 bin/kafka-console-producer.sh --broker-list kafka-broker:9092 --topic newtopic1
+>msg1
+>msg2
+>msg3
+
+#in another terminal, simultaneously running consumer
+root@m1:~/kafka-installation5# docker run --rm -it --link kafka-broker --name consumer kafka:2.11-2.2.1 bin/kafka-console-consumer.sh --bootstrap-server kafka-broker:9092 --topic newtopic1 --from-beginning
+msg1
+msg2
+msg3
+exit
+
+#when running all containers using our single kafka image
+root@m1:~# docker ps
+CONTAINER ID   IMAGE              COMMAND                  CREATED          STATUS          PORTS     NAMES
+acac396dd62f   kafka:2.11-2.2.1   "bin/kafka-console-c…"   16 seconds ago   Up 15 seconds             consumer
+6d478e3e3009   kafka:2.11-2.2.1   "bin/kafka-console-p…"   23 seconds ago   Up 21 seconds             producer
+3bc9a34c01c2   kafka:2.11-2.2.1   "./start.sh"             12 minutes ago   Up 12 minutes             kafka-broker
+

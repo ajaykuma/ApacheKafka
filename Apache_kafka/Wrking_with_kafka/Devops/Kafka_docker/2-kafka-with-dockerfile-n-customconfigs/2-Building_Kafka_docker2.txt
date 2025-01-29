@@ -1,0 +1,4 @@
+#Building kafka images with customized config files ie config files with edited properties, defined paths etc..
+
+'2-kafka-with-dockerfile-n-customconfigs'
+

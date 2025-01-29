@@ -1,0 +1,143 @@
+Setting up multinode cluster in single node
+---------------------------
+#Visit https://archive.apache.org/dist/ 
+#Download zookeeper and Kafka
+kafka_2.11-2.2.1.tgz
+zookeeper-3.4.6.tar.gz
+
+--everything here done under 'hdu' user as admin for kafka & zookeeper
+su - hdu
+#Unpack the tars in prefered location
+
+cd /usr/local
+
+sudo tar -xvf /home/hdu/Downloads/kafka_2.11-2.2.1.tgz
+sudo tar -xvf /home/hdu/Downloads/zookeeper-3.4.6.tar.gz
+
+sudo ln -s kafka_2.11-2.2.1 kafka
+sudo ln -s zookeeper-3.4.6 zookeeper
+
+sudo chown -R hdu:hdu zookeeper*
+sudo chown -R hdu:hdu kafka*
+
+cd
+
+#update the .bashrc for 'hdu' user
+export JAVA_HOME=/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.402.b06-1.el7_9.x86_64/jre
+export PATH=$PATH:$JAVA_HOME/bin
+export KAFKA_HOME=/usr/local/kafka
+export PATH=$PATH:$KAFKA_HOME/bin
+export ZOOKEEPER_HOME=/usr/local/zookeeper
+export PATH=$PATH:$ZOOKEEPER_HOME/bin
+
+source .bashrc
+
+#editing zookeeper and kafka configs
+
+#For zookeeper
+--looking at config file
+ls /usr/local/zookeeper/conf 
+cat /usr/local/zookeeper/conf/zoo.cfg
+
+--we need to use this only if we intend to use external zookeeper for our kafka cluster.
+--since we will use zookeeper provided with kafka, we can focus on configs in $KAFKA_HOME.
+
+cd /usr/local/kafka
+mkdir sncluster
+
+cp config/server.properties sncluster/server1.properties
+cp config/server.properties sncluster/server2.properties
+cp config/server.properties sncluster/server3.properties
+cp config/zookeeper.properties sncluster/zookeeper1.properties
+cp config/zookeeper.properties sncluster/zookeeper2.properties
+cp config/zookeeper.properties sncluster/zookeeper3.properties
+
+#to verify ad edit
+cd sncluster
+
+#edit zookeeper properties
+--zookeeper1.properties
+# the directory where the snapshot is stored.
+#dataDir=/tmp/zookeeper
+# the port at which the clients will connect
+clientPort=2181
+# disable the per-ip limit on the number of connections since this is a non-production config
+maxClientCnxns=0
+tickTime=2000
+dataDir=/tmp/zookeeper1
+initLimit=5
+syncLimit=2
+server.1=localhost:2888:3888
+server.2=localhost:2889:3889
+server.3=localhost:2890:3890
+4lw.commands.whitelist=*
+
+--zookeeper2.properties
+# the directory where the snapshot is stored.
+#dataDir=/tmp/zookeeper
+# the port at which the clients will connect
+clientPort=2182
+# disable the per-ip limit on the number of connections since this is a non-production config
+maxClientCnxns=0
+tickTime=2000
+dataDir=/tmp/zookeeper2
+initLimit=5
+syncLimit=2
+server.1=localhost:2888:3888
+server.2=localhost:2889:3889
+server.3=localhost:2890:3890
+4lw.commands.whitelist=*
+
+--zookeeper3.properties
+# the directory where the snapshot is stored.
+#dataDir=/tmp/zookeeper
+# the port at which the clients will connect
+clientPort=2183
+# disable the per-ip limit on the number of connections since this is a non-production config
+maxClientCnxns=0
+tickTime=2000
+dataDir=/tmp/zookeeper3
+initLimit=5
+syncLimit=2
+server.1=localhost:2888:3888
+server.2=localhost:2889:3889
+server.3=localhost:2890:3890
+4lw.commands.whitelist=*
+
+#since zookeeper's data path is /tmp/zookeeper*
+
+mkdir /tmp/zookeeper1
+echo 1 > /tmp/zookeeper1/myid
+mkdir /tmp/zookeeper2
+echo 2 > /tmp/zookeeper2/myid
+mkdir /tmp/zookeeper3
+echo 3 > /tmp/zookeeper3/myid
+
+#note > we are still in sncluster directory
+#edit server.properties for kafka
+--server1.properties
+broker.id=0
+listeners=PLAINTEXT://localhost:9092
+log.dirs=/tmp/kafka-logs1
+zookeeper.connect=localhost:2181,localhost:2182,localhost:2183
+
+--server2.properties
+broker.id=1
+listeners=PLAINTEXT://localhost:9093
+log.dirs=/tmp/kafka-logs2
+zookeeper.connect=localhost:2181,localhost:2182,localhost:2183
+
+--server3.properties
+broker.id=2
+listeners=PLAINTEXT://localhost:9094
+log.dirs=/tmp/kafka-logs3
+zookeeper.connect=localhost:2181,localhost:2182,localhost:2183
+
+cd
+
+#we can use provided script '1.2.1-setup-kafka-clus.sh' to start the kafka cluster and test it.
+#make sure the script has 777 (executable) permissions given.
+./1.2.1-setup-kafka-clus.sh
+
+
+

@@ -1,0 +1,48 @@
+root@m1:~/kafka-installation# docker-compose ps
+  Name                 Command               State                         Ports                       
+-------------------------------------------------------------------------------------------------------
+kafka       start-kafka.sh                   Up      0.0.0.0:9092->9092/tcp                            
+zookeeper   /bin/sh -c /usr/sbin/sshd  ...   Up      0.0.0.0:2181->2181/tcp, 22/tcp, 2888/tcp, 3888/tcp
+
+root@m1:~/kafka-installation# docker-compose ps
+  Name                 Command                State                           Ports                       
+----------------------------------------------------------------------------------------------------------
+kafka       start-kafka.sh                   Exit 143                                                     
+zookeeper   /bin/sh -c /usr/sbin/sshd  ...   Up         0.0.0.0:2181->2181/tcp, 22/tcp, 2888/tcp, 3888/tcp
+
+root@m1:~/kafka-installation# docker-compose ps
+  Name                 Command                State                           Ports                       
+----------------------------------------------------------------------------------------------------------
+kafka       start-kafka.sh                   Exit 143                                                     
+zookeeper   /bin/sh -c /usr/sbin/sshd  ...   Up         0.0.0.0:2181->2181/tcp, 22/tcp, 2888/tcp, 3888/tcp
+
+root@m1:~/kafka-installation# docker-compose ps
+  Name                 Command                State     Ports
+-------------------------------------------------------------
+kafka       start-kafka.sh                   Exit 143        
+zookeeper   /bin/sh -c /usr/sbin/sshd  ...   Exit 137        
+
+root@m1:~/kafka-installation# docker-compose ps
+  Name                 Command               State                         Ports                       
+-------------------------------------------------------------------------------------------------------
+kafka       start-kafka.sh                   Up      0.0.0.0:9092->9092/tcp                            
+zookeeper   /bin/sh -c /usr/sbin/sshd  ...   Up      0.0.0.0:2181->2181/tcp, 22/tcp, 2888/tcp, 3888/tcp
+
+root@m1:~/kafka-installation# docker exec -it kafka /bin/sh
+/ # ls /opt
+kafka             kafka_2.13-2.7.0  overrides
+/ # ls /opt/kafka
+LICENSE    NOTICE     bin        config     libs       logs       site-docs
+/ # ls /opt/kafka/bin
+connect-distributed.sh               kafka-console-producer.sh            kafka-leader-election.sh             kafka-run-class.sh                   trogdor.sh
+connect-mirror-maker.sh              kafka-consumer-groups.sh             kafka-log-dirs.sh                    kafka-server-start.sh                windows
+connect-standalone.sh                kafka-consumer-perf-test.sh          kafka-mirror-maker.sh                kafka-server-stop.sh                 zookeeper-security-migration.sh
+kafka-acls.sh                        kafka-delegation-tokens.sh           kafka-preferred-replica-election.sh  kafka-streams-application-reset.sh   zookeeper-server-start.sh
+kafka-broker-api-versions.sh         kafka-delete-records.sh              kafka-producer-perf-test.sh          kafka-topics.sh                      zookeeper-server-stop.sh
+kafka-configs.sh                     kafka-dump-log.sh                    kafka-reassign-partitions.sh         kafka-verifiable-consumer.sh         zookeeper-shell.sh
+kafka-console-consumer.sh            kafka-features.sh                    kafka-replica-verification.sh        kafka-verifiable-producer.sh
+
+/ # kafka-topics.sh --list --bootstrap-server localhost:9092
+
+/ # 
+

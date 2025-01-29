@@ -1,0 +1,51 @@
+Creating our own docker image of kafka
+-----------------------
+Download openjdk image from docker hub
+https://hub.docker.com/_/openjdk
+$docker pull openjdk
+
+$docker images
+
+$mkdir 1-kafka-with-dockerfile
+
+$cd 1-kafka-with-dockerfile
+
+$chmod -R 755 start.sh
+
+--from within directory
+#Build your image
+$docker build . -t kafka:2.11-2.2.1
+
+#check images
+$docker images
+
+#run the container
+$docker run -d --name kafka-broker kafka:2.11-2.2.1
+
+$docker container ls
+
+$docker logs -f kafka-broker
+
+#get into container to work with kafka
+$docker exec -it kafka-broker /bin/bash
+
+#rest refer sample_run_out-1.txt
+
+# we can also run commands as temporary container , linked with existing kafka container
+
+$docker run --rm -it --link kafka-broker --name temp1 kafka:2.11-2.2.1 
+bin/kafka-topics.sh --create --bootstrap-server kafka-broker:9092 
+--replication-factor 1 --partitions 1 --topics newtopic1
+
+$docker run --rm -it --link kafka-broker --name temp1 kafka:2.11-2.2.1 
+bin/kafka-topics.sh --create --bootstrap-server kafka-broker:9092 
+--replication-factor 1 --partitions 1 --topics newtopic2
+
+$docker run --rm -it --link kafka-broker --name temp1 kafka:2.11-2.2.1 
+bin/kafka-topics.sh --list --bootstrap-server kafka-broker:9092 
+
+Similarly we can run producer and consumer using same image
+
+#rest refer sample_run_out-1.txt
+
+#Note**: Here the container which runs has kafka and zookeeper processes running within same container

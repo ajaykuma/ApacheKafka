@@ -1,0 +1,127 @@
+root@m1:~/kafka-installation2# docker-compose -f docker-compose.yml up -d
+Creating network "kafkainstallation2_default" with the default driver
+Pulling zookeeper-2 (confluentinc/cp-zookeeper:latest)...
+latest: Pulling from confluentinc/cp-zookeeper
+96965a3a8424: Pull complete
+4d0d850cd4ad: Pull complete
+7a73120408f4: Pull complete
+eb918a808c15: Pull complete
+5c2fffeabbf7: Pull complete
+68bcf2239ce4: Pull complete
+b479bf09eedc: Pull complete
+2e31c2ab64ea: Pull complete
+e5161e1fdbdc: Pull complete
+5dcd26e8f603: Pull complete
+27267efe7f14: Pull complete
+Digest: sha256:9266be6ebed5b0b6ba1c37810c8f740dc8e00327026f40e25f41b1befc25d9c0
+Status: Downloaded newer image for confluentinc/cp-zookeeper:latest
+Pulling kafka-1 (confluentinc/cp-kafka:latest)...
+latest: Pulling from confluentinc/cp-kafka
+96965a3a8424: Already exists
+4d0d850cd4ad: Already exists
+7a73120408f4: Already exists
+eb918a808c15: Already exists
+5c2fffeabbf7: Already exists
+68bcf2239ce4: Already exists
+b479bf09eedc: Already exists
+2e31c2ab64ea: Already exists
+e5161e1fdbdc: Already exists
+e0f07497560d: Pull complete
+b88780ca570c: Pull complete
+Digest: sha256:ee6e42ce4f79623c69cf758848de6761c74bf9712697fe68d96291a2b655ce7f
+Status: Downloaded newer image for confluentinc/cp-kafka:latest
+Creating kafkainstallation2_zookeeper-3_1 ... 
+Creating kafkainstallation2_zookeeper-2_1 ... 
+Creating kafkainstallation2_zookeeper-2_1
+Creating kafkainstallation2_zookeeper-1_1 ... 
+Creating kafkainstallation2_zookeeper-3_1
+Creating kafkainstallation2_zookeeper-2_1 ... done
+Creating kafkainstallation2_kafka-3_1 ... 
+Creating kafkainstallation2_kafka-1_1 ... 
+Creating kafkainstallation2_kafka-2_1 ... 
+Creating kafkainstallation2_kafka-1_1
+Creating kafkainstallation2_kafka-3_1
+Creating kafkainstallation2_kafka-3_1 ... done
+
+root@m1:~/kafka-installation2# docker container ls
+CONTAINER ID   IMAGE                              COMMAND                  CREATED         STATUS         PORTS                                                    NAMES
+ba213c0405a4   confluentinc/cp-kafka:latest       "/etc/confluent/dock…"   3 minutes ago   Up 3 minutes   9092/tcp, 0.0.0.0:29092->29092/tcp                       kafkainstallation2_kafka-2_1
+f6e03bc10a64   confluentinc/cp-kafka:latest       "/etc/confluent/dock…"   3 minutes ago   Up 3 minutes   9092/tcp, 0.0.0.0:39092->39092/tcp                       kafkainstallation2_kafka-3_1
+96f900d55d4f   confluentinc/cp-kafka:latest       "/etc/confluent/dock…"   3 minutes ago   Up 3 minutes   9092/tcp, 0.0.0.0:19092->19092/tcp                       kafkainstallation2_kafka-1_1
+60e759552cdb   confluentinc/cp-zookeeper:latest   "/etc/confluent/dock…"   4 minutes ago   Up 3 minutes   2181/tcp, 2888/tcp, 3888/tcp, 0.0.0.0:12181->12181/tcp   kafkainstallation2_zookeeper-1_1
+de8a52b1e699   confluentinc/cp-zookeeper:latest   "/etc/confluent/dock…"   4 minutes ago   Up 3 minutes   2181/tcp, 2888/tcp, 3888/tcp, 0.0.0.0:32181->32181/tcp   kafkainstallation2_zookeeper-3_1
+c21d613b5866   confluentinc/cp-zookeeper:latest   "/etc/confluent/dock…"   4 minutes ago   Up 3 minutes   2181/tcp, 2888/tcp, 3888/tcp, 0.0.0.0:22181->22181/tcp   kafkainstallation2_zookeeper-2_1
+
+root@m1:~/kafka-installation2# docker-compose ps
+              Name                          Command            State                           Ports                         
+-----------------------------------------------------------------------------------------------------------------------------
+kafkainstallation2_kafka-1_1       /etc/confluent/docker/run   Up      0.0.0.0:19092->19092/tcp, 9092/tcp                    
+kafkainstallation2_kafka-2_1       /etc/confluent/docker/run   Up      0.0.0.0:29092->29092/tcp, 9092/tcp                    
+kafkainstallation2_kafka-3_1       /etc/confluent/docker/run   Up      0.0.0.0:39092->39092/tcp, 9092/tcp                    
+kafkainstallation2_zookeeper-1_1   /etc/confluent/docker/run   Up      0.0.0.0:12181->12181/tcp, 2181/tcp, 2888/tcp, 3888/tcp
+kafkainstallation2_zookeeper-2_1   /etc/confluent/docker/run   Up      2181/tcp, 0.0.0.0:22181->22181/tcp, 2888/tcp, 3888/tcp
+kafkainstallation2_zookeeper-3_1   /etc/confluent/docker/run   Up      2181/tcp, 2888/tcp, 0.0.0.0:32181->32181/tcp, 3888/tcp
+
+root@m1:~/kafka-installation2# apt-get install telnet
+Reading package lists... Done
+Building dependency tree       
+Reading state information... Done
+telnet is already the newest version (0.17-41).
+telnet set to manually installed.
+The following packages were automatically installed and are no longer required:
+  efibootmgr gir1.2-geocodeglib-1.0 libegl1-mesa libfwup1 libllvm8 libwayland-egl1-mesa linux-hwe-5.4-headers-5.4.0-72 linux-hwe-5.4-headers-5.4.0-74 python3-click python3-colorama
+  ubuntu-web-launchers
+Use 'sudo apt autoremove' to remove them.
+0 upgraded, 0 newly installed, 0 to remove and 28 not upgraded.
+root@m1:~/kafka-installation2# telnet 12181
+Trying 0.0.47.149...
+telnet: Unable to connect to remote host: Network is unreachable
+root@m1:~/kafka-installation2# telnet localhost 12181
+Trying 127.0.0.1...
+Connected to localhost.
+Escape character is '^]'.
+
+^CConnection closed by foreign host.
+
+root@m1:~/kafka-installation2# docker exec -it kafka /bin/sh
+Error: No such container: kafka
+
+root@m1:~/kafka-installation2# docker exec -it kafkainstallation2_kafka-1_1 /bin/sh
+
+sh-4.4$ ls /etc/confluent/docker
+bash-config  configure  ensure  kafka.properties.template  launch  log4j.properties.template  mesos-setup.sh  run  tools-log4j.properties.template
+
+sh-4.4$ ls
+sh-4.4$ ls /
+bin  boot  dev  etc  home  lib  lib64  licenses  lost+found  media  mnt  opt  proc  root  run  sbin  srv  sys  tmp  usr  var
+
+sh-4.4$ kafka-topics --list --bootstrap-server localhost:19092
+
+sh-4.4$ kafka-topics --create --topic Test1 --bootstrap-server localhost:19092 --partitions 3 --replication-factor 3
+Created topic Test1.
+
+sh-4.4$ kafka-topics --list --bootstrap-server localhost:19092
+Test1
+
+sh-4.4$ kafka-topics --describe --bootstrap-server localhost:19092
+Topic: Test1    TopicId: zyY3lv8WSRmZCoLPfRGeEQ PartitionCount: 3       ReplicationFactor: 3    Configs: 
+        Topic: Test1    Partition: 0    Leader: 2       Replicas: 2,3,1 Isr: 2,3,1
+        Topic: Test1    Partition: 1    Leader: 3       Replicas: 3,1,2 Isr: 3,1,2
+        Topic: Test1    Partition: 2    Leader: 1       Replicas: 1,2,3 Isr: 1,2,3
+sh-4.4$ exit
+exit
+
+root@m1:~/kafka-installation2# docker-compose down
+Stopping kafkainstallation2_kafka-2_1     ... done
+Stopping kafkainstallation2_kafka-3_1     ... done
+Stopping kafkainstallation2_kafka-1_1     ... done
+Stopping kafkainstallation2_zookeeper-1_1 ... done
+Stopping kafkainstallation2_zookeeper-3_1 ... done
+Stopping kafkainstallation2_zookeeper-2_1 ... done
+Removing kafkainstallation2_kafka-2_1     ... done
+Removing kafkainstallation2_kafka-3_1     ... done
+Removing kafkainstallation2_kafka-1_1     ... done
+Removing kafkainstallation2_zookeeper-1_1 ... done
+Removing kafkainstallation2_zookeeper-3_1 ... done
+Removing kafkainstallation2_zookeeper-2_1 ... done
+Removing network kafkainstallation2_default

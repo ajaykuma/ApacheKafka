@@ -1,128 +1,142 @@
---Stream processing
-#Testing streaming app
-#testing kafka streams demo application
+--change hostnames accordingly
+TO BE VERIFIED..
+#working with kafka cluster
 
-IF
-#Running with a standalone cluster
-#code here in :
-https://github.com/a0x8o/kafka/blob/master/streams/examples/src/main/java/org/apache/kafka/streams/examples/wordcount/WordCountDemo.java
+#all datasets used here can be found in 'https://github.com/ajaykuma/datasets_for_work' or
 
-#relevant jar just FYI
-/usr/local/kafka/libs/kafka-streams-examples-2.2.1.jar
+use wget
+wget https://github.com/ajaykuma/Datasets_For_Work/blob/main/Bank_full.csv
+--create topic BankData with specific partitions and repl factor
+[hdu@c1 ~]$ kafka-topics.sh --create --topic BankData --partitions 3 --replication-factor 3 --bootstrap-server localhost:9092
+[hdu@c1 ~]$ kafka-console-producer.sh --topic BankData --broker-list localhost:9092 < <path>/Bank_full.csv
 
-#to test this demo streaming application setup a standalone cluster,
- setup a kafka stream application using IDE and edit 'streamConfigs' pointing to your kafka cluster
+kafka-run-class.sh kafka.tools.GetOffsetShell --topic BankData --broker-list localhost:9092
 
-#creating topic for input
-hdu@n1:~$ kafka-topics.sh --create     --bootstrap-server localhost:9092     --replication-factor 3     --partitions 3 --topic streams-plaintext-input
-hdu@n1:~$ kafka-topics.sh --list --bootstrap-server localhost:9092
-__consumer_offsets
-streams-plaintext-input
-topin1
-topin2
-topin3
-topic4
-topic5
-topic6
+--without creating topic explicitly
+kafka-console-producer.sh --topic BankData1 --broker-list localhost:9092 < <path>/Bank_full.csv
 
-#creating topic for wordcount output
-hdu@n1:~$ kafka-topics.sh --create     --bootstrap-server localhost:9092     --replication-factor 3     --partitions 3 --topic streams-wordcount-output  --config cleanup.policy=compact 
-hdu@n1:~$ kafka-topics.sh --list --bootstrap-server localhost:9092
-__consumer_offsets
-streams-plaintext-input
-streams-wordcount-output
-topin1
-topin2
-topin3
-topic4
-topic5
-topic6
+kafka-run-class.sh kafka.tools.GetOffsetShell --topic BankData1 --broker-list localhost:9092
 
-hdu@n1:~$ kafka-topics.sh --bootstrap-server localhost:9092 --describe 
-Topic:topin1	PartitionCount:1	ReplicationFactor:1	Configs:segment.bytes=1073741824
-	Topic: topin1	Partition: 0	Leader: 2	Replicas: 2	Isr: 2
-Topic:topin2	PartitionCount:1	ReplicationFactor:1	Configs:segment.bytes=1073741824
-	Topic: topin2	Partition: 0	Leader: 1	Replicas: 1	Isr: 1
-Topic:streams-plaintext-input	PartitionCount:3	ReplicationFactor:3	Configs:segment.bytes=1073741824
-	Topic: streams-plaintext-input	Partition: 0	Leader: 2	Replicas: 2,1,3	Isr: 2,1,3
-	Topic: streams-plaintext-input	Partition: 1	Leader: 3	Replicas: 3,2,1	Isr: 3,2,1
-	Topic: streams-plaintext-input	Partition: 2	Leader: 1	Replicas: 1,3,2	Isr: 1,3,2
-Topic:topic5	PartitionCount:1	ReplicationFactor:2	Configs:segment.bytes=1073741824
-	Topic: topic5	Partition: 0	Leader: 2	Replicas: 2,3	Isr: 2,3
-Topic:topic6	PartitionCount:3	ReplicationFactor:3	Configs:segment.bytes=1073741824
-	Topic: topic6	Partition: 0	Leader: 1	Replicas: 1,3,2	Isr: 1,2,3
-	Topic: topic6	Partition: 1	Leader: 2	Replicas: 2,1,3	Isr: 2,1,3
-	Topic: topic6	Partition: 2	Leader: 2	Replicas: 3,2,1	Isr: 2,1,3
-Topic:topin3	PartitionCount:1	ReplicationFactor:1	Configs:segment.bytes=1073741824
-	Topic: topin3	Partition: 0	Leader: 1	Replicas: 1	Isr: 1
-Topic:topic4	PartitionCount:1	ReplicationFactor:3	Configs:segment.bytes=1073741824
-	Topic: topic4	Partition: 0	Leader: 2	Replicas: 2,3,1	Isr: 1,2,3
-Topic:streams-wordcount-output	PartitionCount:3	ReplicationFactor:3	Configs:cleanup.policy=compact,segment.bytes=1073741824
-	Topic: streams-wordcount-output	Partition: 0	Leader: 3	Replicas: 3,1,2	Isr: 3,1,2
-	Topic: streams-wordcount-output	Partition: 1	Leader: 1	Replicas: 1,2,3	Isr: 1,2,3
-	Topic: streams-wordcount-output	Partition: 2	Leader: 2	Replicas: 2,3,1	Isr: 2,3,1
+--optional---
+kafka-console-producer.sh --topic Test1 --broker-list localhost:9092 < <path>/global_superstore_2016_v.csv
+--optional---
 
-#if stand alone cluster
-kafka-run-class.sh org.apache.kafka.streams.examples.wordcount.WordCountDemo
+--optional---
+kafka-topics.sh --create --topic PrimerData --partitions 3 --replication-factor 3 --bootstrap-server localhost:9092
+kafka-console-producer.sh --topic PrimerData --broker-list localhost:9092 < /home/hdu/Downloads/primer-dataset.json
+kafka-console-consumer.sh --topic PrimerData --bootstrap-server localhost:9092 --from-beginning
+--optional---
 
-#after starting wordcount application
+kafka-topics.sh --create --topic bankdata2 --bootstrap-server localhost:9092 --partitions 3 --replication-factor 3
 
-#The demo application will read from the input topic streams-plaintext-input, perform the computations of the WordCount 
- algorithm on each of the read messages, and continuously write its current results to the output topic 
- streams-wordcount-output.
+--edit config
+kafka-configs.sh --alter --entity-type topics --entity-name bankdata2 --add-config segment.bytes=2000000 --zookeeper localhost:2181
 
-#start producer
-kafka-console-producer.sh --bootstrap-server localhost:9092 --topic streams-plaintext-input
+--check config
+kafka-configs.sh --describe --entity-type topics --entity-name bankdata2 --zookeeper ch1:2181 | grep segment
+Configs for topic 'bankdata2' are segment.bytes=2000000
 
-#reading from output topic
-kafka-console-consumer.sh --bootstrap-server localhost:9092 \
-    --topic streams-wordcount-output \
-    --from-beginning \
-    --formatter kafka.tools.DefaultMessageFormatter \
-    --property print.key=true \
-    --property print.value=true \
-    --property key.deserializer=org.apache.kafka.common.serialization.StringDeserializer \
-    --property value.deserializer=org.apache.kafka.common.serialization.LongDeserializer
+--push some data
+kafka-console-producer.sh --broker-list localhost:9092 --topic bankdata2 < Downloads/Bank_full.csv
+kafka-console-producer.sh --broker-list localhost:9092 --topic bankdata2 < Downloads/Bank_full.csv
 
---------------------
-#running on a distributed cluster
---An already ready to use jar can be found in this folder
+--look at offsets
+kafka-run-class.sh kafka.tools.GetOffsetShell --topic bankdata2 --broker-list localhost:9092
 
-#Create springboot application project (as suggested in git)
-#Delete the main application which gets created
-#Add wordcount demo from github link and edit the code,properties as per your cluster..
-#do a maven install (to create jar)
-#copy the jar file to your cluster node or download it from dropbox.
-#create topics
+--look at .log files
+ls -all /usr/local/kafka/kafka-logs/bankdata2-0/
+ls -all /usr/local/kafka/kafka-logs/bankdata2-1/
+ls -all /usr/local/kafka/kafka-logs/bankdata2-2/
 
-#creating topic for input
-hdu@n1:~$ kafka-topics.sh --create     --bootstrap-server n1:9092     --replication-factor 3     --partitions 3 
-          --topic streams-plaintext-input
-hdu@n1:~$ kafka-topics.sh --list --bootstrap-server n1:9092
+kafka-dump-log.sh --files /usr/local/kafka/kafka-logs/bankdata2-0/00000000000000000000.log
+kafka-dump-log.sh --files /usr/local/kafka/kafka-logs/bankdata2-0/00000000000000000000.timeindex
+kafka-dump-log.sh --files /usr/local/kafka/kafka-logs/bankdata2-0/00000000000000000000.index
 
-#creating topic for wordcount output
-hdu@n1:~$ kafka-topics.sh --create     --bootstrap-server n1:9092     --replication-factor 3     --partitions 3 
-          --topic streams-wordcount-output  --config cleanup.policy=compact 
-hdu@n1:~$ kafka-topics.sh --list --bootstrap-server n1:9092
-__consumer_offsets
-streams-plaintext-input
-streams-wordcount-output
+#other option specifying serializer
+kafka-console-producer.sh --topic primerdata --broker-list localhost:9092 --property 
+value-serializer="import org.apache.kafka.connect.json.JsonSerializer" < employees.json
+
+kafka-console-consumer.sh --topic primerdata --bootstrap-server localhost:9092 --property value-serializer="org.springframework.kafka.support.serializer.JsonDeserializer" --from-beginning
+{"name":"Michael", "salary":3000}
 
 
-Step1: from within your cluster
-     -- $java -jar streamsapp-0.0.1-SNAPSHOT.jar
-     -- This starts your streaming wordcount application
+Other commands/options
+#look at configs which can be changed
+kafka-configs.sh --zookeeper localhost:2181
 
-Step2: Start Producer
-        $kafka-console-producer.sh --broker-list n1:9092 --topic streams-plaintext-input
+#Understanding Logs
 
-Step 3: Start Consumer
-	$kafka-console-consumer.sh --bootstrap-server n1:9092     --topic streams-wordcount-output     
---from-beginning     --formatter kafka.tools.DefaultMessageFormatter     
---property print.key=true     
---property print.value=true     
---property key.deserializer=org.apache.kafka.common.serialization.StringDeserializer 
---property value.deserializer=org.apache.kafka.common.serialization.LongDeserializer
+#looking to timeindex log
+C:\Users\Wic10\Downloads\kafka\kafka_2.11-2.2.1\bin\windows>kafka-dump-log.bat --files C:\Users\Wic10\Downloads\Java\Kafka_Prod_Consu_for_string2\Kafka_Project\tmp\kafka-logs\Test1-0\00000000000000000000.timeindex
 
-#confirm if streaming app does the wordcount
+#performance test
+kafka-producer-perf-test.sh --topic Test2 --record-size 1024 --throughput -1 --num-records 1000000 --producer-props acks=all bootstrap.servers=localhost:9092
 
+kafka-run-class.sh kafka.tools.EndToEndLatency localhost:9092,c2:9092,c3:9092 Test2 10000 1 10000
+
+kafka-consumer-perm-test.sh --topic Test2 --broker-list localhost:9092 --messages 1000000
+
+#looking into metadata nodes
+kafka-metadata-shell.sh --snapshot /usr/local/kafka/kafka-logs/bankdata-0/00000000000000000030.snapshot
+
+#Connecting to zookeeper
+[hdu@c1 Working_with_cluster]$ zookeeper-shell.sh localhost:2181
+Connecting to localhost:2181
+Welcome to ZooKeeper!
+JLine support is disabled
+
+WATCHER::
+
+WatchedEvent state:SyncConnected type:None path:null
+ls
+ls [-s] [-w] [-R] path
+ls /
+[admin, brokers, cluster, config, consumers, controller, controller_epoch, feature, isr_change_notification, latest_producer_id_block, log_dir_event_notification, zookeeper]
+ls /cluster
+[id]
+ls /cluster/id
+[]
+get /cluster/id
+{"version":"1","id":"Sk_5hgxbTCSEjlYj8_KZtA"}
+ls /config
+[brokers, changes, clients, ips, topics, users]
+ls /config/topics
+[Topic1, Topic2, Topic3, __consumer_offsets, bankdata, employees, employees1, hello_world_topic, primerdata]
+get /config/topics/Topic1
+{"version":1,"config":{}}
+ls /config/topics/Topic1
+
+quit
+
+#Reassignment:
+kafka-topics.sh --describe --topic primerdata --bootstrap-server localhost:9092
+Topic: primerdata	TopicId: rbuXpXn-QeKcH5DlHqs4AQ	PartitionCount: 3	ReplicationFactor: 3	Configs: segment.bytes=2000000
+	Topic: primerdata	Partition: 0	Leader: 1	Replicas: 1,0,2	Isr: 0,2,1
+	Topic: primerdata	Partition: 1	Leader: 0	Replicas: 0,2,1	Isr: 0,2,1
+	Topic: primerdata	Partition: 2	Leader: 2	Replicas: 2,1,0	Isr: 0,2,1
+
+--create json file 'primerdata-test.json
+{"topics":
+    [{"topic": "primerdata"}],
+     "version":1
+      }
+
+
+[hdu@c1 ~]$ kafka-reassign-partitions.sh --bootstrap-server localhost:9092 --topics-to-move-json-file primerdata-test.json --broker-list "2,3,1" --generate
+Current partition replica assignment
+{"version":1,"partitions":[{"topic":"primerdata","partition":0,"replicas":[1,0,2],"log_dirs":["any","any","any"]},{"topic":"primerdata","partition":1,"replicas":[0,2,1],"log_dirs":["any","any","any"]},{"topic":"primerdata","partition":2,"replicas":[2,1,0],"log_dirs":["any","any","any"]}]}
+
+Proposed partition reassignment configuration
+{"version":1,"partitions":[{"topic":"primerdata","partition":0,"replicas":[1,2,3],"log_dirs":["any","any","any"]},{"topic":"primerdata","partition":1,"replicas":[2,3,1],"log_dirs":["any","any","any"]},{"topic":"primerdata","partition":2,"replicas":[3,1,2],"log_dirs":["any","any","any"]}]}
+
+
+--save proposed partition into a file
+[hdu@c1 ~]$ kafka-reassign-partitions.sh --bootstrap-server localhost:9092 --reassignment-json-file expand-cluster-reassignment.json --execute 
+Current partition replica assignment
+
+{"version":1,"partitions":[{"topic":"primerdata","partition":0,"replicas":[1,0,2],"log_dirs":["any","any","any"]},{"topic":"primerdata","partition":1,"replicas":[0,2,1],"log_dirs":["any","any","any"]},{"topic":"primerdata","partition":2,"replicas":[2,1,0],"log_dirs":["any","any","any"]}]}
+
+Save this to use as the --reassignment-json-file option during rollback
+Successfully started partition reassignments for primerdata-0,primerdata-1,primerdata-2
+
+--verify

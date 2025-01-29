@@ -1,0 +1,134 @@
+###Building separate docker images of kafka and zookeeper> running 2 different containers>
+
+>Main folder
+>zk-image
+>kafka-image
+
+in zk-image
+docker build . -t kafka-nzk:2.11
+
+in kafka-image
+docker build . -t kafka-sever:2.11
+
+
+#check if images were built
+docker images
+REPOSITORY     TAG       IMAGE ID       CREATED             SIZE
+kafka-server   2.11      d6c77a94f5d0   18 minutes ago      723MB
+kafka-nzk      2.11      bf3690d3ffb3   About an hour ago   723MB
+
+docker container ls
+
+#since we intend to run two different containers (as of now on same node), lets create a network
+#to attach these containers
+
+###To check containers connected to same network
+
+Usage:  docker network inspect [OPTIONS] NETWORK [NETWORK...]
+root@m1:~# docker network inspect bridge
+
+(Options which can be used to create network and connect containers to our created network)
+-------
+#create network which will be used by containers to connect to each other
+$docker network create tmp_kafka
+
+#Run the containers
+
+docker run -dit --network=tmp_kafka --name zookeeper kafka-nzk:2.11 /bin/sh
+docker run -dit --network=tmp_kafka --name kafka-server kafka-server:2.11 /bin/sh
+
+Note**Apart from any other custom properties in 'kafka-image/server.properties', we have
+>>>>   zookeeper.connect=zookeeper:2181 <<<<  pointing to container that will have zkeeper running
+
+(Options which can be used: sample command)
+----
+--if any error while starting container and we need to rerun to start..
+
+#error 
+docker: Error response from daemon: Conflict. The container name "/kafka-server" is already in use by container "763f3b9ca4bce0ac108d483f0a4b43ce55de84314c43e5fe8cb67c336c6b7316". You have to remove (or rename) that container to be able to reuse that name.
+
+# docker rm /kafka-server
+/kafka-server
+
+--specifying ports, data mount etc when starting container
+root@m1:~/kafka-installation7/zk-image# docker run --volume=data:/opt/zookeeper-3.4.6/state/zookeeper -p 2181:2181 -p 2888:2888 -p 3888:3888 -p 8080:8080 -it --name zk-server zk-server:3.4 /bin/sh 
+# 
+
+#check if container is attached to the network
+$docker inspect network tmp_kafka
+
+#if container was not started or not connected to network
+#start container and then attach it
+
+docker run -dit --network=tmp_kafka --name zookeeper kafka-nzk:2.11 /bin/sh
+docker run -dit --network=tmp_kafka --name kafka-server kafka-server:2.11 /bin/sh
+
+# docker network connect tmp_kafka zookeeper
+# docker network connect tmp_kafka kafka-server
+
+$docker inspect network temp_kafka
+
+#connect to kafka and zk containers
+$docker exec -it kafka-server /bin/sh
+$docker exec -it zookeeper /bin/sh
+
+#check if kafka as process is already running within your already running kafka container
+#check if zk as process is already running within your already running zk container
+$jps
+
+#if not, then we need to start kafka & zk (mentioned later)
+#the processes should have started as process of container starting, 'Dockerfile'/'start.sh' script needs to be fixed, however
+#exit from containers for now
+
+#Additional checks to ensure connectivity between containers
+$check if containers can ping each other
+docker exec zookeeper ping kafka-server -c2
+# docker exec kafka-server ping zookeeper -c2
+ping: zk-server: No address associated with hostname
+
+#to check if icc is enabled which allows communication between containers (by default enabled)
+root@m1:# docker inspect -f '{{index .Options "com.docker.network.bridge.enable_icc"}}' bridge
+true
+root@m1:# docker inspect -f '{{index .Options "com.docker.network.bridge.enable_icc"}}' tmp_kafka
+
+#Note** Kafka can also be started using
+docker run -dit --name kafka-server -p 9092:9092 -e KAFKA_BROKER_ID=1 -e
+KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181 -e KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://0.0.0.0:9092 -e KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1 kafka-server:2.11 /bin/bash
+
+#check which networks container are connected to
+root@m1:# docker inspect -f '{{range $key, $value := .NetworkSettings.Networks}}{{$key}} {{end}}' zookeeper
+bridge 
+root@m1:# docker inspect -f '{{range $key, $value := .NetworkSettings.Networks}}{{$key}} {{end}}' kafka-server
+bridge 
+
+#Now, since containers are running but don't have the zookeeper or kafka processes started within them
+#connect to zk
+$docker exec -it zk-server /bin/sh
+    #zookeeper-3.4.6/bin/zkServer.sh start
+    #jps
+#check if QuorumPeer is running
+
+$docker exec -it kafka-server /bin/sh
+    #kafka_2.11-2.2.1/bin/kafka-server-start.sh kafka_2.11-2.2.1/config/server.properties --override zookeeper.connect=172.17.0.2:2181
+    #jps
+
+#test working with kafka from another terminal
+$docker exec -it kafka-server /bin/sh
+     #kafka_2.11-2.2.1/bin/kafka-topics.sh --list --bootstrap-server localhost:9092
+
+$# kafka_2.11-2.2.1/bin/kafka-topics.sh --create --topic test1 --zookeeper 172.17.0.2:2181 --partitions 1 --replication-factor 1
+Created topic test1.
+
+$# kafka_2.11-2.2.1/bin/kafka-topics.sh --list --bootstrap-server localhost:9092
+test1
+
+#Additional commands which might be helpful
+#To stop container
+$docker stop zk-server
+
+#to remove the registered name of container
+$docker rm zk-server
+
+#to delete an image
+$docker rmi zk-server:3.4
+

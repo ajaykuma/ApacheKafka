@@ -1,0 +1,10 @@
+Deploying sample applications
+----------------
+4 Applications:
+2 Backend 
+--built using crytal
+--built using nodeJS
+& 2 Frontend services
+--built using ruby
+
+refer: Deploying_App_1.txt

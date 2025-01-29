@@ -93,7 +93,7 @@ server=8080
 --create a topic 'Topic1'
 for example on windows:
 C:\Users\Win10\Downloads\kafka\kafka_2.11-2.2.1\bin\windows>kafka-topics.bat 
---create --topic Topic1 --bootstrap-server localhost:9092 --partitions 1 --replication-factor 1
+--create --topic Topic1 --bootstrap-server c1:9092 --partitions 1 --replication-factor 1
 
 --Run your application as 'java application'
 
@@ -104,7 +104,7 @@ http://localhost:8080/kafka/publish/msg3
 
 --Test if your data was published to topic
 C:\Users\Win10\Downloads\kafka\kafka_2.11-2.2.1\bin\windows>kafka-console-consumer.bat
- --topic Topic1 --from-beginning --bootstrap-server localhost:9092
+ --topic Topic1 --from-beginning --bootstrap-server c1:9092
 
 If all fine, you have a spring boot application that can publish data to your topic in kafka.
 

@@ -1,0 +1,81 @@
+#Using 'Dockerfile' & 'docker-compose'
+
+--kafka-installationA is from one of our previous examples and contains a 'Dockerfile' that is used to spin up a kafka standalone--we need to also create a 'docker-compose.yml' which can use a 'Dockerfile' or build containers from services
+
+#As of now 'docker-compose.yml' contains as shown below:
+---
+version: '3'
+
+services:
+        kafka-cl1:
+           build: kafka-installationA
+           container_name: kafkacl1
+---
+$docker-compose up
+#the above command will build image of kafka and then start a container with this image
+
+#docker container ls
+
+#test and connect
+docker exec -it kafkainstallation8_kafka_1 /bin/sh
+# ls
+LICENSE  NOTICE  bin  config  libs  logs  site-docs  start.sh
+
+# pwd      
+/opt/kafka_2.11-2.2.1
+
+# bin/kafka-topics.sh --list --bootstrap-server localhost:9092
+
+# exit
+
+#stop the container
+
+#After testing the run of container, add one more build into the docker-compose file
+--'kafka-installationB' in this folder --this is from one of our previous examples and contains a 'Dockerfile' that will spin up kafka cluster with customized properties
+
+#Adding to existing docker-compose.yml file
+---
+version: '3'
+
+services:
+        kafka-cl1:
+           build: kafka-installationA
+           container_name: kafkacl1
+
+        kafka-cl2:
+           build: kafka-installationB
+           container_name: kafkacl2
+---
+
+--refer provided 'docker-compose.yml'
+
+$docker-compose up
+
+docker container ls
+CONTAINER ID   IMAGE     COMMAND   CREATED   STATUS    PORTS     NAMES
+
+docker images
+REPOSITORY                       TAG          IMAGE ID       CREATED          SIZE
+kafkainstallation8_kafka-cl2     latest       d10e0c632f5d   29 seconds ago   622MB
+kafkainstallation8_kafka-cl1     latest       854694db2cc0   22 minutes ago   583MB
+hello-world                      latest       d1165f221234   4 months ago     13.3kB
+wurstmeister/zookeeper           latest       3f43f72cb283   2 years ago      510MB
+
+docker container ls
+CONTAINER ID   IMAGE                          COMMAND        CREATED          STATUS          PORTS     NAMES
+bc4330d44082   kafkainstallation8_kafka-cl1   "./start.sh"   47 seconds ago   Up 43 seconds             kafkacl1
+e7e5070a4eec   kafkainstallation8_kafka-cl2   "./start.sh"   47 seconds ago   Up 44 seconds             kafkacl2
+
+docker exec kafkacl1 ping kafkacl2 -c2
+PING kafkacl2 (172.21.0.3) 56(84) bytes of data.
+64 bytes from kafkacl2.kafkainstallation8_default (172.21.0.3): icmp_seq=1 ttl=64 time=0.075 ms
+64 bytes from kafkacl2.kafkainstallation8_default (172.21.0.3): icmp_seq=2 ttl=64 time=0.051 ms
+
+--- kafkacl2 ping statistics ---
+2 packets transmitted, 2 received, 0% packet loss, time 32ms
+rtt min/avg/max/mdev = 0.051/0.063/0.075/0.012 ms
+
+=============
+sample-output
+docker-compose up
+

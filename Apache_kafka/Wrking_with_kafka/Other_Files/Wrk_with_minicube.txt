@@ -1,0 +1,447 @@
+GCP
+
+Testing http:
+https://cloud.google.com/compute/docs/tutorials/basic-webserver-apache
+
+echo '<!doctype html><html><body><h1>Hello World!</h1></body></html>' | sudo tee /var/www/html/index.html
+
+http service runs fine and accessible
+
+#on machine
+Start Docker or if not installed, install it and start
+
+sudo systemctl status docker
+
+https://minikube.sigs.k8s.io/docs/start/?arch=%2Flinux%2Fx86-64%2Fstable%2Fbinary+download
+
+
+update .bashrc for user
+alias kubectl="minikube kubectl --"
+
+minikube status
+
+minikube start
+
+<option:https://minikube.sigs.k8s.io/docs/tutorials/multi_node/> <more details later--scroll down>
+
+minikube addons list
+
+minikube status
+
+kubectl cluster-info
+
+
+[hdu@i1 ~]$ kubectl cluster-info
+Kubernetes control plane is running at https://192.168.49.2:8443
+CoreDNS is running at https://192.168.49.2:8443/api/v1/namespaces/kube-system/services/kube-dns:dns/proxy
+
+To further debug and diagnose cluster problems, use 'kubectl cluster-info dump'.
+
+[hdu@i1 ~]$ kubectl get pods -A
+NAMESPACE              NAME                                        READY   STATUS      RESTARTS        AGE
+ingress-nginx          ingress-nginx-admission-create-tr8sq        0/1     Completed   0               16h
+ingress-nginx          ingress-nginx-admission-patch-4tjvn         0/1     Completed   1               16h
+ingress-nginx          ingress-nginx-controller-768f948f8f-78kzs   1/1     Running     5 (2m16s ago)   16h
+kube-system            coredns-7db6d8ff4d-pxs6w                    1/1     Running     5 (29m ago)     17h
+kube-system            etcd-minikube                               1/1     Running     5 (29m ago)     17h
+kube-system            kube-apiserver-minikube                     1/1     Running     5 (2m16s ago)   17h
+kube-system            kube-controller-manager-minikube            1/1     Running     5 (29m ago)     17h
+kube-system            kube-proxy-tnkhr                            1/1     Running     5 (29m ago)     17h
+kube-system            kube-scheduler-minikube                     1/1     Running     5 (29m ago)     17h
+kube-system            metrics-server-c59844bb4-8mk9c              1/1     Running     6 (29m ago)     17h
+kube-system            storage-provisioner                         1/1     Running     10 (92s ago)    17h
+kubernetes-dashboard   dashboard-metrics-scraper-b5fc48f67-mbtzw   1/1     Running     0               107s
+kubernetes-dashboard   kubernetes-dashboard-779776cb65-ljzqz       1/1     Running     0               107s
+
+minikube dashboard
+* Verifying dashboard health ...
+* Launching proxy ...
+* Verifying proxy health ...
+* Opening http://127.0.0.1:40399/api/v1/namespaces/kubernetes-dashboard/services/http:kubernetes-dashboard:/proxy/ in your default browser...
+  http://127.0.0.1:40399/api/v1/namespaces/kubernetes-dashboard/services/http:kubernetes-dashboard:/proxy/
+
+<ctl+c>
+
+<optional>
+--to check URL from another terminal
+minikube dashboard --url
+
+kubectl proxy 
+or
+kubectl proxy — address='0.0.0.0' — accept-hosts='^*$'
+
+--to access dashboard
+convert your *.ppk file for machine into *.pem (using puttygen)
+chmod -R 400 hdupriv.pem
+
+tunneling from local to cloud machine
+ssh -L 12345:localhost:8001 hdu@35.246.225.41 -i "hdupriv.pem"
+
+Now try accessing dashboard using
+http://127.0.0.1:12345/api/v1/namespaces/kubernetes-dashboard/services/http:kubernetes-dashboard:/proxy/#/workloads?namespace=default
+
+#working with deployment and accessing by exposing it as a service
+
+--from first terminal
+
+kubectl create deployment hello-node --image=registry.k8s.io/e2e-test-images/agnhost:2.39 -- /agnhost netexec --http-port=8080
+deployment.apps/hello-node created
+
+kubectl get pods -A
+NAMESPACE              NAME                                        READY   STATUS      RESTARTS      AGE
+default                hello-node-55fdcd95bf-4tc9g                 1/1     Running     0             105s
+
+kubectl get deployment
+NAME         READY   UP-TO-DATE   AVAILABLE   AGE
+hello-node   1/1     1            1           2m5s
+
+[hdu@i1 ~]$ kubectl get pods --namespace default
+NAME                          READY   STATUS    RESTARTS   AGE
+hello-node-55fdcd95bf-4tc9g   1/1     Running   0          3m2s
+
+--to look at events
+kubectl get events
+
+--to look at configs
+kubectl config view
+
+[hdu@i1 ~]$ kubectl get pods --namespace default
+NAME                          READY   STATUS    RESTARTS   AGE
+hello-node-55fdcd95bf-4tc9g   1/1     Running   0          5m3s
+
+[hdu@i1 ~]$ kubectl logs hello-node-55fdcd95bf-4tc9g
+I0824 08:53:35.018134       1 log.go:195] Started HTTP server on port 8080
+I0824 08:53:35.018591       1 log.go:195] Started UDP server on port  8081
+
+#By default, the Pod is only accessible by its internal IP address within the Kubernetes cluster. 
+To make the hello-node Container accessible from outside the Kubernetes virtual network, you have to expose the Pod as a Kubernetes Service.
+
+There are two major categories of services in Kubernetes:
+NodePort
+LoadBalancer
+
+NodePort access
+A NodePort service is the most basic way to get external traffic directly to your service. NodePort, 
+as the name implies, opens a specific port, and any traffic that is sent to this port is forwarded to the service.
+
+Services of type NodePort can be exposed via the minikube service <service-name> --url command. 
+It must be run in a separate terminal window to keep the tunnel open.
+
+--create a service
+[hdu@i1 ~]$ kubectl expose deployment hello-node --type=NodePort --port=8080
+service/hello-node exposed
+
+[hdu@i1 ~]$ kubectl get deployment
+NAME         READY   UP-TO-DATE   AVAILABLE   AGE
+hello-node   1/1     1            1           42m
+[hdu@i1 ~]$ kubectl get services
+NAME         TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)          AGE
+hello-node   NodePort    10.101.213.144   <none>        8080:32155/TCP   24m
+kubernetes   ClusterIP   10.96.0.1        <none>        443/TCP          18h
+
+[hdu@i1 ~]$ minikube service hello-node --url
+
+--getting the NodePort
+kubectl get service hello-node --output='jsonpath="{.spec.ports[0].nodePort}"'
+
+--to create tunnel
+Example: ssh -i /Users/FOO/.minikube/machines/minikube/id_rsa -L TUNNEL_PORT:CLUSTER_IP:TARGET_PORT
+ssh -i "hdupriv.pem" -L 8081:192.168.49.2:32155 hdu@35.246.225.41 
+
+Access from browser : http://127.0.0.1:8081
+
+#if exposed as LoadBalancer
+A LoadBalancer service is the standard way to expose a service to the internet. With this method, each service gets its own IP address.
+
+Services of type LoadBalancer can be exposed via the minikube tunnel command.
+It must be run in a separate terminal window to keep the LoadBalancer running. 
+
+in terminal:
+minikube tunnel
+
+in another terminal
+kubectl create deployment hello-minikube1 --image=kicbase/echo-server:1.0
+
+kubectl expose deployment hello-minikube1 --type=LoadBalancer --port=8090
+
+kubectl get services
+NAME              TYPE           CLUSTER-IP       EXTERNAL-IP      PORT(S)          AGE
+hello-minikube1   LoadBalancer   10.104.127.169   10.104.127.169   8090:30153/TCP   3m10s
+hello-node        NodePort       10.101.213.144   <none>           8080:32155/TCP   38m
+kubernetes        ClusterIP      10.96.0.1        <none>           443/TCP          18h
+
+[hdu@i1 ~]$ minikube service hello-minikube1 --url
+http://192.168.49.2:30153
+
+--creating tunnel (from local to cloud)
+$ ssh -i "hdupriv.pem" -L 12343:10.104.127.169:30153 hdu@35.246.225.41
+
+--starting nifi with zk
+kubectl describe services/nifi01
+
+export NODE_PORT="$(kubectl get services/nifi01 -o go-template='{{(index .spec.ports 0).nodePort}}')"
+echo "NODE_PORT=$NODE_PORT"
+
+#Minikube with multiple nodes
+https://minikube.sigs.k8s.io/docs/tutorials/multi_node/
+
+
+================
+Zk ensemble
+-------------
+minikube start --kubernetes-version v1.16.0 \
+              --cpus=4 \
+              --disk-size='100000mb' \
+              --memory='6000mb'
+
+or
+just minikube start
+[hdu@i1 ~]$ minikube start
+* minikube v1.33.1 on Centos 9 (amd64)
+* Using the docker driver based on existing profile
+* Starting "minikube" primary control-plane node in "minikube" cluster
+* Pulling base image v0.0.44 ...
+* Restarting existing docker container for "minikube" ...
+
+[hdu@i1 ~]$ minikube status
+minikube
+type: Control Plane
+host: Running
+kubelet: Running
+apiserver: Running
+kubeconfig: Configured
+
+#or we can do
+#minikube delete 
+
+and
+
+[hdu@i1 ~]$ minikube start --kubernetes-version v1.20.0 --disk-size='120000mb' --memory='8000mb'
+* minikube v1.33.1 on Centos 9 (amd64)
+* Automatically selected the docker driver. Other choices: none, ssh
+* Using Docker driver with root privileges
+* Starting "minikube" primary control-plane node in "minikube" cluster
+* Pulling base image v0.0.44 ...
+* Downloading Kubernetes v1.20.0 preload ...
+
+[hdu@i1 ~]$ kubectl get pod -A
+    > kubectl.sha256:  64 B / 64 B [-------------------------] 100.00% ? p/s 0s
+    > kubectl:  38.37 MiB / 38.37 MiB [------------] 100.00% 23.31 MiB p/s 1.8s
+NAMESPACE     NAME                               READY   STATUS              RESTARTS   AGE
+kube-system   coredns-74ff55c5b-vvwhj            0/1     ContainerCreating   0          3s
+kube-system   etcd-minikube                      0/1     Running             0          17s
+kube-system   kube-apiserver-minikube            1/1     Running             0          17s
+kube-system   kube-controller-manager-minikube   0/1     Running             0          17s
+kube-system   kube-proxy-k8c65                   1/1     Running             0          3s
+kube-system   kube-scheduler-minikube            0/1     Running             0          17s
+kube-system   storage-provisioner                1/1     Running             0          17s
+[hdu@i1 ~]$ kubectl get pod -A
+NAMESPACE     NAME                               READY   STATUS    RESTARTS   AGE
+kube-system   coredns-74ff55c5b-vvwhj            1/1     Running   0          13s
+kube-system   etcd-minikube                      0/1     Running   0          27s
+kube-system   kube-apiserver-minikube            1/1     Running   0          27s
+kube-system   kube-controller-manager-minikube   0/1     Running   0          27s
+kube-system   kube-proxy-k8c65                   1/1     Running   0          13s
+kube-system   kube-scheduler-minikube            0/1     Running   0          27s
+kube-system   storage-provisioner                1/1     Running   0          27s
+
+
+kubectl apply -f deployments/zkeeperc.yaml
+
+[hdu@i1 ~]$ kubectl get statefulset
+NAME        READY   AGE
+zookeeper   3/3     13m
+
+[hdu@i1 ~]$ kubectl get pod
+NAME          READY   STATUS    RESTARTS   AGE
+zookeeper-0   1/1     Running   0          12m
+zookeeper-1   1/1     Running   0          12m
+zookeeper-2   1/1     Running   0          11m
+
+[hdu@i1 ~]$ kubectl get service
+NAME                 TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)             AGE
+kubernetes           ClusterIP   10.96.0.1       <none>        443/TCP             42m
+zookeeper-headless   ClusterIP   None            <none>        2888/TCP,3888/TCP   36m
+zookeeper-service    ClusterIP   10.98.218.255   <none>        2181/TCP            36m
+
+
+--getting into pods
+zookeeper@zookeeper-0:/$ echo stat | nc localhost 2181
+Zookeeper version: 3.4.14-4c25d480e66aadd371de8bd2fd8da255ac140bcf, built on 03/06/2019 16:18 GMT
+Clients:
+ /0:0:0:0:0:0:0:1:41346[0](queued=0,recved=1,sent=0)
+
+Latency min/avg/max: 0/0/0
+Received: 131
+Sent: 130
+Connections: 1
+Outstanding: 0
+Zxid: 0x0
+Mode: follower
+Node count: 4
+
+zookeeper@zookeeper-1:/$ echo stat | nc localhost 2181
+Zookeeper version: 3.4.14-4c25d480e66aadd371de8bd2fd8da255ac140bcf, built on 03/06/2019 16:18 GMT
+Clients:
+ /0:0:0:0:0:0:0:1:42038[0](queued=0,recved=1,sent=0)
+
+Latency min/avg/max: 0/0/0
+Received: 123
+Sent: 122
+Connections: 1
+Outstanding: 0
+Zxid: 0x100000000
+Mode: leader
+Node count: 4
+Proposal sizes last/min/max: -1/-1/-1
+
+zookeeper@zookeeper-2:/$ echo stat | nc localhost 2181
+Zookeeper version: 3.4.14-4c25d480e66aadd371de8bd2fd8da255ac140bcf, built on 03/06/2019 16:18 GMT
+Clients:
+ /0:0:0:0:0:0:0:1:51316[0](queued=0,recved=1,sent=0)
+
+Latency min/avg/max: 0/0/0
+Received: 113
+Sent: 112
+Connections: 1
+Outstanding: 0
+Zxid: 0x0
+Mode: follower
+Node count: 4
+
+kubectl  exec -it zookeeper-0 metrics.sh 2181
+
+[hdu@i1 ~]$ kubectl  exec -it zookeeper-1 metrics.sh 2181
+kubectl exec [POD] [COMMAND] is DEPRECATED and will be removed in a future version. 
+Use kubectl exec [POD] -- [COMMAND] instead.
+zk_version      3.4.14-4c25d480e66aadd371de8bd2fd8da255ac140bcf, built on 03/06/2019 16:18 GMT
+zk_avg_latency  0
+zk_max_latency  0
+zk_min_latency  0
+zk_packets_received     324
+zk_packets_sent 323
+zk_num_alive_connections        1
+zk_outstanding_requests 0
+zk_server_state leader
+zk_znode_count  4
+zk_watch_count  0
+zk_ephemerals_count     0
+zk_approximate_data_size        27
+zk_open_file_descriptor_count   27
+zk_max_file_descriptor_count    1048576
+zk_fsync_threshold_exceed_count 0
+zk_followers    2
+zk_synced_followers     2
+zk_pending_syncs        0
+zk_last_proposal_size   -1
+zk_max_proposal_size    -1
+zk_min_proposal_size    -1
+
+Notice that zookeeper-1 pod has two more attributes in its metrics namely zk_followers and zk_synced_followers. 
+Only leaders have zk_followers and zk_synced_followers metrics.
+
+--looking into logs
+kubectl logs zookeeper-1 | more
+
+**notice that there are a lot of Processing ruok command in the log. 
+This is because it has INFO level logging, and the ZooKeeper command for health check is ruok 
+which should return imok.
+
+hdu@i1 ~]$ kubectl logs zookeeper-1 | grep ruok | wc -l
+356
+
+The ready_live.sh script uses ruok (from the liveness and readiness probes)
+
+----
+#!/usr/bin/env bash
+OK=$(echo ruok | nc 127.0.0.1 $1)
+if [ "$OK" == "imok" ]; then
+	exit 0
+else
+	exit 1
+fi
+
+----
+Note**
+we modified the yaml manifest for our ZooKeeper statefulset to use requiredDuringSchedulingIgnoredDuringExecution
+ versus preferredDuringSchedulingIgnoredDuringExecution.
+
+--Use kubectl exec to get the hostnames of the Pods in the Zookeeper StatefulSet.
+[hdu@i1 ~]$ for i in 0 1 2; do kubectl exec zookeeper-$i -- hostname; done
+zookeeper-0
+zookeeper-1
+zookeeper-2
+
+The Kubernetes StatefulSet controller gives each Pod a unique hostname based on its index. 
+The hostnames are "${statefulset_name}-${index}"". In the yaml manifest file the replicas was set to 3. 
+Therefore the StatefulSet controller creates three Pods with their hostnames set to zookeeper-0, 
+zookeeper-1, and zookeeper-3.
+
+The ZooKeeper nodes store their server’s id in a file called myid in the zookeeper data directory 
+(see name: datadir \ mountPath: /var/lib/zookeeper in the zookeeper.yaml file).
+
+Let's look at the contents of those files with kubectl exec and cat.
+
+[hdu@i1 ~]$ for i in 0 1 2; do echo "myid zookeeper-$i"; kubectl exec zookeeper-$i -- cat /var/lib/zookeeper/data/myid; done
+myid zookeeper-0
+1
+myid zookeeper-1
+2
+myid zookeeper-2
+3
+
+Kubernetes uses 0 based indexing but ZooKeeper uses start at 1 based indexing.
+
+Get fully qualified domain name with kubectl exec hostname -f
+[hdu@i1 ~]$ for i in 0 1 2; do kubectl exec zookeeper-$i -- hostname -f; done
+zookeeper-0.zookeeper-headless.default.svc.cluster.local
+zookeeper-1.zookeeper-headless.default.svc.cluster.local
+zookeeper-2.zookeeper-headless.default.svc.cluster.local
+
+
+The zookeeper-headless service creates a domain for each pod in the statefulset.
+
+The DNS A records in Kubernetes DNS resolve the FQDNs to the Pods’ IP addresses. 
+If the Pods gets reschedules or upgrading, the A records will put to new IP addresses, 
+but the name will stay the same.
+
+ZooKeeper was configured to use a config file called zoo.cfg 
+(/opt/zookeeper/conf/zoo.cfg ). You can use kubectl exec to cat the contents of the zoo.cfg.
+
+[hdu@i1 ~]$ kubectl exec zookeeper-0 -- cat /opt/zookeeper/conf/zoo.cfg
+#This file was autogenerated DO NOT EDIT
+clientPort=2181
+dataDir=/var/lib/zookeeper/data
+dataLogDir=/var/lib/zookeeper/data/log
+tickTime=2000
+initLimit=10
+syncLimit=5
+maxClientCnxns=60
+minSessionTimeout=4000
+maxSessionTimeout=40000
+autopurge.snapRetainCount=3
+autopurge.purgeInteval=12
+server.1=zookeeper-0.zookeeper-headless.default.svc.cluster.local:2888:3888
+server.2=zookeeper-1.zookeeper-headless.default.svc.cluster.local:2888:3888
+server.3=zookeeper-2.zookeeper-headless.default.svc.cluster.local:2888:3888
+
+----------------
+
+minikube delete
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

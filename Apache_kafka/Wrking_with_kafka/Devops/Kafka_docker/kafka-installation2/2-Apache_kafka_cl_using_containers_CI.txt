@@ -1,0 +1,80 @@
+Note**
+
+with newer version commands changed
+'docker-compose' is now 'docker compose'
+
+
+#Install kafka cluster using Docker & Docker-compose [confluentinc: kafka,zookeeper image]
+#Install kafka using Docker & Docker-compose
+-------------------
+--Allows us to run kafka on any OS
+--Avoids requirements of installing new dependencies
+
+#Prerequisites check
+$docker --version
+Docker version 20.10.2, build 20.10.2-0ubuntu~18.04.02
+
+$docker-compose --version
+docker-compose version 1.17.1, build unknown
+
+#Docker allows us to create virtual env inside the host machine
+#To install kafka we can create 'kafka containers' & 'zookeeper containers' 
+#within this virtual environment
+#These containers can then communicate with each other for kafka to be usable.
+
+#These containers can be reached via some ports which are exposed.
+
+--Look for 'docker image of zookeeper created by confluentinc'
+  https://hub.docker.com/r/confluentinc/cp-zookeeper
+
+--command to get the image
+docker pull confluentinc/cp-zookeeper
+
+--similarly for kafka
+docker pull confluentinc/cp-kafka
+#But we will pull these images from our docker-compose.yml
+
+#create a directory 'kafka-installation2'
+#create a file 'docker-compose.yml' in this directory
+
+--contents of 'docker-compose.yml' as provided in 'kafka-installation2'
+
+--
+#to pull images and start the container
+$docker-compose -f docker-compose.yml up
+
+--newer version
+$docker compose -f docker-compose.yml up
+
+#to run containers in background
+$docker-compose -f docker-compose.yml up -d
+
+--newer version
+$docker compose -f docker-compose.yml up -d
+
+$docker container ls
+
+$docker compose ps
+
+#install telnet
+
+$telnet localhost 12181
+<ctrl+c>
+
+#to connect to kafka cluster from CLI
+$docker exec  -it kafkainstallation2_kafka-1_1 /bin/bash
+
+sh-4.4$ls /
+sh-4.4$ls /bin
+
+sh-4.4$kafka-topics --list --bootstrap-server localhost:19092
+
+sh-4.4$kafka-topics --create --topic Test1 --bootstrap-server localhost:19092 --partitions 3 --replication-factor 3
+
+sh-4.4$kafka-topics --list --bootstrap-server localhost:19092
+
+sh-4.4$kafka-topics --describe --bootstrap-server localhost:19092
+
+
+
+

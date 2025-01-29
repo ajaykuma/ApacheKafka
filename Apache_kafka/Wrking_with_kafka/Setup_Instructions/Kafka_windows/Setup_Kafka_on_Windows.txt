@@ -1,0 +1,56 @@
+#Setup Kafka on Windows
+---------------
+
+Download kafka from archive.apache.org and unzip/untar it 
+
+For example: kafka_2.11-2.2.1 
+             or newer version kafka_2.13-2.8.1
+             or more newer version kafka_2.12-3.5.2
+
+Download Java (1.8) from oracle website
+For example: C:\Java\jdk1.8.0_341 and C:\Java\jre1.8.0_341
+
+or use C:\Java\jdk-11
+
+set environment and system variables for java
+JAVA_HOME=C:\Java\jdk1.8.0_341
+
+system variables
+JAVA_HOME=C:\Java\jdk1.8.0_341\bin
+
+--unpack kafka say 2.11-2.2.1
+
+set environment and system variables for Kafka
+KAFKA_HOME=C:\kafka\kafka_2.11-2.2.1\
+
+system variables
+C:\kafka\kafka_2.11-2.2.1\bin
+
+--editing required if we are changing settings or we can leave default..
+
+Edit zookeeper.properties & Edit server.properties in in C:\\kafka\\kafka_2.11-2.2.1\\config
+
+--for now we can leave as default
+
+#start zookeeper
+C:\Kafka\kafka_2.11-2.2.1\bin\windows>zookeeper-server-start.bat ..\\..\\config\\zookeeper.properties
+
+#kafka will connect to embedded zookeeper,thus no changes required to
+server.properties in C:\\kafka\\config
+C:\Kafka\kafka_2.11-2.2.1\bin\windows>kafka-server-start.bat ..\\..\\config\\server.properties
+
+#Testing kafka
+C:\\kafka\\kafka_2.11-2.2.1\\bin\\windows>kafka-topics.bat --list --bootstrap-server localhost:9092
+
+
+C:\\kafka\\kafka_2.11-2.2.1\\bin\\windows>kafka-topics.bat --create --topic test1 --bootstrap-server localhost:9092 --partitions 1
+Created topic test1.
+
+C:\\kafka\\kafka_2.11-2.2.1\\bin\\windows>kafka-topics.bat --list --bootstrap-server localhost:9092
+test1
+
+C:\\kafka\\kafka_2.11-2.2.1\\bin\\windows>kafka-topics.bat --describe --bootstrap-server localhost:9092
+Topic: test1    TopicId: GiyzayfkRAKt0Jhikl1S2Q PartitionCount: 1       ReplicationFactor: 1    Configs: segment.bytes=1073741824
+        Topic: test1    Partition: 0    Leader: 0       Replicas: 0     Isr: 0
+
+

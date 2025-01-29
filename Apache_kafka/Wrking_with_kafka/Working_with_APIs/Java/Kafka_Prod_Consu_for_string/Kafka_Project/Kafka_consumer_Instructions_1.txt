@@ -89,7 +89,7 @@ public class KafkaConfig {
 		
 		Map<String, Object> config = new HashMap<>();
 		
-		config.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092");
+		config.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, "c1:9092");
 		config.put(ConsumerConfig.GROUP_ID_CONFIG, "group_id");
 		/*additionally we can mention which DeSerializer to use, although for string not required*/		
 		return new DefaultKafkaConsumerFactory<>(config);

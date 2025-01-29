@@ -1,0 +1,81 @@
+Note**
+
+with newer version commands changed
+'docker-compose' is now 'docker compose'
+
+
+
+Install kafka using Docker & Docker-compose
+-------------------
+--Allows us to run kafka on any OS
+--Avoids requirements of installing new dependencies
+
+#Prerequisites check
+$docker --version
+Docker version 20.10.2, build 20.10.2-0ubuntu~18.04.02
+
+$docker-compose --version
+docker-compose version 1.17.1, build unknown
+
+#Docker allows us to create virtual env inside the host machine
+#To install kafka we can create 'kafka container' & 'zookeeper container' 
+#within this virtual environment
+#These containers can then communicate with each other for kafka to be usable.
+
+#These containers can be reached via some ports which are exposed.
+
+--Look for 'docker image of zookeeper created by wurstmeister'
+  https://hub.docker.com/r/wurstmeister/zookeeper/
+
+--command to get the image
+docker pull wurstmeister/zookeeper
+
+--similarly for kafka
+docker pull wurstmeister/kafka
+
+#But we will pull these images from our docker-compose.yml
+
+#create a directory 'kafka-installation1'
+#create a file 'docker-compose.yml' in this directory
+
+--contents of 'docker-compose.yml' as provided in 'kafka-installation1'
+
+
+#to pull images and start the container
+$docker-compose -f docker-compose.yml up
+
+--newer version
+$docker compose -f docker-compose.yml up
+
+#to run containers in background
+$docker-compose -f docker-compose.yml up -d
+
+--newer version
+$docker compose -f docker-compose.yml up -d
+
+$docker container ls
+
+#to look at containers running
+$docker compose ps
+
+--refer sample_run_out1.txt as provided in 'kafka-installation1'
+
+#to look at all images
+$docker images
+
+#to get into container
+$docker exec -it kafka /bin/bash
+#ls /opt
+#ls /opt/kafka
+#ls /opt/kafka/bin
+#kafka-topics.sh --list --bootstrap-server localhost:9092
+
+--refer sample_run_out1.txt as provided in 'kafka-installation1'
+
+#to stop containers
+$docker-compose down
+
+
+
+
+

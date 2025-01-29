@@ -1,0 +1,74 @@
+#Prometheus Setup
+===============
+--setup prometheus
+
+
+
+
+
+
+
+
+
+
+
+
+
+===============
+--Testing
+https://github.com/prometheus/jmx_exporter
+--download JMX exporter and kafka sample yml file for monitoring 
+
+[hdu@localhost ~]$ ls prometheus/
+jmx_prometheus_httpserver-0.20.0.jar  jmx_prometheus_javaagent-0.20.0.jar  jmx_prometheus_javaagent-1.0.1.jar  kafka-2_0_0.yml
+zookeeper.yaml
+
+--since we intend to use http exporter
+ The kafka-2_0_0.yml file i.e. sample_jmx_exporter.yml contains following before the rules section
+ #hostPort: localhost:9990
+
+If commented out as above, SEVERE: Configuration error: When running jmx_exporter in standalone mode (using jmx_prometheus_httpserver-*.jar) you must configure 'jmxUrl' or 'hostPort'.
+
+So
+ hostPort: localhost:9990
+
+--kafka-server-start.sh contains 
+  export JMX_PORT=9990
+  export JMX_PROMETHEUS_PORT=7071
+
+--zookeeper-server-start.sh contains (will be used when and if we use zoo
+  #export JMX_PORT=9998
+  #export JMX_PROMETHEUS_PORT=7072
+
+--kafka-run-class.sh contains
+# JMX settings
+if [ -z “$KAFKA_JMX_OPTS” ]; then
+KAFKA_JMX_OPTS="-Dcom.sun.management.jmxremote=true -Dcom.sun.management.jmxremote.authenticate=false -Dcom.sun.management.jmxremote.ssl=false -Djava.rmi.server.hostname=localhost -Dcom.sun.management.jmxremote.port=9990 -Dcom.sun.management.jmxremote.rmi.port=9990 -Djava.net.preferIPv4Stack=true -javaagent:/usr/local/kafka/libs/jmx_prometheus_httpserver-0.20.0.jar=7071:/usr/local/kafka/config/sample_jmx_exporter.yml"
+fi
+
+# Generic jvm settings you want to add
+if [ -z "$KAFKA_OPTS" ]; then
+  KAFKA_OPTS="-Dcom.sun.management.jmxremote=true -Dcom.sun.management.jmxremote.authenticate=false -Dcom.sun.management.jmxremote.ssl=false -Djava.rmi.server.hostname=localhost -Dcom.sun.management.jmxremote.port=9990 -Dcom.sun.management.jmxremote.rmi.port=9990 "
+fi
+
+java -jar prometheus/jmx_prometheus_httpserver-0.20.0.jar 7071 /usr/local/kafka/config/sample_jmx_exporter.yml
+
+--check from browser if it shows kafka metrics
+http://localhost:7071/metrics
+
+--if prometheus.yml contains >
+scrape_configs:
+  # The job name is added as a label `job=<job_name>` to any timeseries scraped from this config.
+  - job_name: "prometheus"
+
+    # metrics_path defaults to '/metrics'
+    # scheme defaults to 'http'.
+
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: "kafka"
+    static_configs:
+      - targets: ["localhost:7071"]
+
+#then from web UI > prometheus > http://localhost:9090 > http://localhost:9090/targets

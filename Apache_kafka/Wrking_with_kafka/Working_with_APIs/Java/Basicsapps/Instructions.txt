@@ -1,0 +1,9 @@
+Download apachekafka repo from git
+unzip it
+--for testing BasicProducer & BasicConsumer
+  in eclipse> create new project > new package under src -->main.example
+              configure build path > add external jars > point to /usr/local/kafka/libs/
+              check if jre is correctly mapped
+ now copy files from git folder to your workspace
+  cp <gitpath>/*.java eclipse-workspace/Mynewproject/src/main/example/
+--test applications

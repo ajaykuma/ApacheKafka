@@ -1,0 +1,127 @@
+root@m1:~/kafka-installation6# docker build . -t kafka-new:2.11
+Sending build context to Docker daemon  12.29kB
+Step 1/7 : FROM openjdk:8
+ ---> f67a59e543c1
+Step 2/7 : RUN cd /opt && curl -OL http://archive.apache.org/dist/kafka/2.2.1/kafka_2.11-2.2.1.tgz && tar -zxvf kafka_2.11-2.2.1.tgz && rm kafka_2.11-2.2.1.tgz && curl -OL http://archive.apache.org/dist/zookeeper/zookeeper-3.4.6/zookeeper-3.4.6.tar.gz && tar -zxvf zookeeper-3.4.6.tar.gz && rm zookeeper-3.4.6.tar.gz
+ ---> Running in ace776e7fb12
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+100 61.0M  100 61.0M    0     0  2931k      0  0:00:21  0:00:21 --:--:-- 2945k
+kafka_2.11-2.2.1/
+kafka_2.11-2.2.1/LICENSE
+kafka_2.11-2.2.1/NOTICE
+kafka_2.11-2.2.1/bin/
+......
+kafka_2.11-2.2.1/libs/connect-basic-auth-extension-2.2.1.jar
+kafka_2.11-2.2.1/libs/kafka-streams-2.2.1.jar
+kafka_2.11-2.2.1/libs/rocksdbjni-5.15.10.jar
+kafka_2.11-2.2.1/libs/kafka-streams-scala_2.11-2.2.1.jar
+kafka_2.11-2.2.1/libs/kafka-streams-test-utils-2.2.1.jar
+kafka_2.11-2.2.1/libs/kafka-streams-examples-2.2.1.jar
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+100 16.8M  100 16.8M    0     0  2948k      0  0:00:05  0:00:05 --:--:-- 3007k
+zookeeper-3.4.6/
+zookeeper-3.4.6/src/
+....
+Step 3/7 : WORKDIR /opt
+ ---> Running in d9b2caf23aff
+Removing intermediate container d9b2caf23aff
+ ---> 8e20589efec1
+Step 4/7 : COPY zoo.cfg /opt/zookeeper-3.4.6/conf
+ ---> 56de0d91fbe6
+Step 5/7 : COPY server.properties /opt/kafka_2.11-2.2.1/config/
+ ---> 03437cf8d308
+Step 6/7 : COPY start.sh /opt
+ ---> 3541a9a0e433
+Step 7/7 : CMD ["./start.sh"]
+ ---> Running in 5ee3f5865779
+Removing intermediate container 5ee3f5865779
+ ---> 9fee43fc458a
+Successfully built 9fee43fc458a
+Successfully tagged kafka-new:2.11
+root@m1:~/kafka-installation6# docker images
+REPOSITORY               TAG          IMAGE ID       CREATED         SIZE
+kafka-new                2.11         9fee43fc458a   8 seconds ago   622MB
+kafka                    2.11-2.2.1   77d1a09f757f   2 hours ago     583MB
+openjdk                  latest       c9022ce77bf9   2 days ago      467MB
+openjdk                  8            f67a59e543c1   3 days ago      514MB
+wurstmeister/kafka       latest       c3b059ede60e   6 weeks ago     507MB
+hello-world              latest       d1165f221234   4 months ago    13.3kB
+wurstmeister/zookeeper   latest       3f43f72cb283   2 years ago     510MB
+
+root@m1:~/kafka-installation6# docker run -d --name kafka-broker kafka-new:2.11
+bbffab274e8586e49a19c543d1d5abc32005dd644ceb5efc78be95981832afc0
+
+root@m1:~/kafka-installation6# docker container ps
+CONTAINER ID   IMAGE            COMMAND        CREATED          STATUS          PORTS     NAMES
+bbffab274e85   kafka-new:2.11   "./start.sh"   17 seconds ago   Up 15 seconds             kafka-broker
+
+root@m1:~/kafka-installation6# docker container ps
+CONTAINER ID   IMAGE            COMMAND        CREATED          STATUS          PORTS     NAMES
+bbffab274e85   kafka-new:2.11   "./start.sh"   21 seconds ago   Up 19 seconds             kafka-broker
+
+root@m1:~/kafka-installation6# docker container ps
+CONTAINER ID   IMAGE            COMMAND        CREATED          STATUS          PORTS     NAMES
+bbffab274e85   kafka-new:2.11   "./start.sh"   11 minutes ago   Up 11 minutes             kafka-broker
+
+root@m1:~/kafka-installation6# docker exec -it kafka-broker /bin/sh
+# ls
+kafka_2.11-2.2.1  start.sh  zookeeper-3.4.6  zookeeper.out
+
+# ls zookeeper-3.4.6
+CHANGES.txt  NOTICE.txt  README_packaging.txt  build.xml  contrib     docs     ivysettings.xml	recipes  zookeeper-3.4.6.jar	  zookeeper-3.4.6.jar.md5
+LICENSE.txt  README.txt  bin		       conf	  dist-maven  ivy.xml  lib		src	 zookeeper-3.4.6.jar.asc  zookeeper-3.4.6.jar.sha1
+
+# ls zookeeper-3.4.6/bin
+README.txt  zkCleanup.sh  zkCli.cmd  zkCli.sh  zkEnv.cmd  zkEnv.sh  zkServer.cmd  zkServer.sh
+
+# zookeeper-3.4.6/bin/zkCli.sh -server localhost:2182
+Connecting to localhost:2182
+2021-07-26 00:28:35,211 [myid:] - INFO  [main:Environment@100] - Client environment:zookeeper.version=3.4.6-1569965, built on 02/20/2014 09:09 GMT
+2021-07-26 00:28:35,214 [myid:] - INFO  [main:Environment@100] - Client environment:host.name=bbffab274e85
+2021-07-26 00:28:35,214 [myid:] - INFO  [main:Environment@100] - Client environment:java.version=1.8.0_302
+2021-07-26 00:28:35,222 [myid:] - INFO  [main:Environment@100] - Client environment:java.vendor=Oracle Corporation
+2021-07-26 00:28:35,222 [myid:] - INFO  [main:Environment@100] - Client environment:java.home=/usr/local/openjdk-8/jre
+2021-07-26 00:28:35,222 [myid:] - INFO  [main:Environment@100] - Client environment:java.class.path=/opt/zookeeper-3.4.6/bin/../build/classes:/opt/zookeeper-3.4.6/bin/../build/lib/*.jar:/opt/zookeeper-3.4.6/bin/../lib/slf4j-log4j12-1.6.1.jar:/opt/zookeeper-3.4.6/bin/../lib/slf4j-api-1.6.1.jar:/opt/zookeeper-3.4.6/bin/../lib/netty-3.7.0.Final.jar:/opt/zookeeper-3.4.6/bin/../lib/log4j-1.2.16.jar:/opt/zookeeper-3.4.6/bin/../lib/jline-0.9.94.jar:/opt/zookeeper-3.4.6/bin/../zookeeper-3.4.6.jar:/opt/zookeeper-3.4.6/bin/../src/java/lib/*.jar:/opt/zookeeper-3.4.6/bin/../conf:
+2021-07-26 00:28:35,222 [myid:] - INFO  [main:Environment@100] - Client environment:java.library.path=/usr/java/packages/lib/amd64:/usr/lib64:/lib64:/lib:/usr/lib
+2021-07-26 00:28:35,223 [myid:] - INFO  [main:Environment@100] - Client environment:java.io.tmpdir=/tmp
+2021-07-26 00:28:35,223 [myid:] - INFO  [main:Environment@100] - Client environment:java.compiler=<NA>
+2021-07-26 00:28:35,223 [myid:] - INFO  [main:Environment@100] - Client environment:os.name=Linux
+2021-07-26 00:28:35,223 [myid:] - INFO  [main:Environment@100] - Client environment:os.arch=amd64
+2021-07-26 00:28:35,223 [myid:] - INFO  [main:Environment@100] - Client environment:os.version=5.4.0-80-generic
+2021-07-26 00:28:35,223 [myid:] - INFO  [main:Environment@100] - Client environment:user.name=root
+2021-07-26 00:28:35,224 [myid:] - INFO  [main:Environment@100] - Client environment:user.home=/root
+2021-07-26 00:28:35,224 [myid:] - INFO  [main:Environment@100] - Client environment:user.dir=/opt
+2021-07-26 00:28:35,226 [myid:] - INFO  [main:ZooKeeper@438] - Initiating client connection, connectString=localhost:2182 sessionTimeout=30000 watcher=org.apache.zookeeper.ZooKeeperMain$MyWatcher@68de145
+Welcome to ZooKeeper!
+2021-07-26 00:28:35,269 [myid:] - INFO  [main-SendThread(localhost:2182):ClientCnxn$SendThread@975] - Opening socket connection to server localhost/127.0.0.1:2182. Will not attempt to authenticate using SASL (unknown error)
+JLine support is enabled
+2021-07-26 00:28:35,351 [myid:] - INFO  [main-SendThread(localhost:2182):ClientCnxn$SendThread@852] - Socket connection established to localhost/127.0.0.1:2182, initiating session
+2021-07-26 00:28:35,362 [myid:] - INFO  [main-SendThread(localhost:2182):ClientCnxn$SendThread@1235] - Session establishment complete on server localhost/127.0.0.1:2182, sessionid = 0x17ae02302c90001, negotiated timeout = 30000
+
+WATCHER::
+
+WatchedEvent state:SyncConnected type:None path:null
+[zk: localhost:2182(CONNECTED) 0] ls /
+[cluster, controller_epoch, controller, brokers, zookeeper, admin, isr_change_notification, consumers, log_dir_event_notification, latest_producer_id_block, config]
+[zk: localhost:2182(CONNECTED) 1] ls /broker
+Node does not exist: /broker
+[zk: localhost:2182(CONNECTED) 2] ls /brokers
+[ids, topics, seqid]
+[zk: localhost:2182(CONNECTED) 3] ls /brokers/ids
+[1]
+[zk: localhost:2182(CONNECTED) 4] ls /brokers/topics
+[]
+
+[zk: localhost:2182(CONNECTED) 9] quit
+Quitting...
+2021-07-26 00:29:30,318 [myid:] - INFO  [main:ZooKeeper@684] - Session: 0x17ae02302c90001 closed
+2021-07-26 00:29:30,319 [myid:] - INFO  [main-EventThread:ClientCnxn$EventThread@512] - EventThread shut down
+# exit
+
+root@m1:~/kafka-installation6# docker exec -it kafka-broker /bin/sh
+# ls
+kafka_2.11-2.2.1  start.sh  zookeeper-3.4.6  zookeeper.out
+# kafka_2.11-2.2.1/bin/kafka-topics.sh --list --bootstrap-server localhost:9092
+

@@ -1,0 +1,88 @@
+'docker-compose' is now 'docker compose'
+
+Install kafka cluster using Docker & Docker-compose [wurstmeister kafka,zookeeper image]
+-------------------
+--Allows us to run kafka on any OS
+--Avoids requirements of installing new dependencies
+
+#Prerequisites check
+$docker --version
+Docker version 20.10.2, build 20.10.2-0ubuntu~18.04.02
+
+$docker-compose --version
+docker-compose version 1.17.1, build unknown
+
+#Docker allows us to create virtual env inside the host machine
+#To install kafka we can create 'kafka containers' & 'zookeeper containers' 
+#within this virtual environment
+#These containers can then communicate with each other for kafka to be usable.
+
+#These containers can be reached via some ports which are exposed.
+
+--Look for 'docker image of zookeeper created by wurstmeister'
+  https://hub.docker.com/r/wurstmeister/zookeeper/
+
+--command to get the image
+docker pull wurstmeister/zookeeper
+
+--similarly for kafka
+docker pull wurstmeister/kafka
+
+#But we will pull these images from our docker-compose.yml
+
+##Special NOTES**
+This is similar to 'kafka-installation2', however here we
+--use 'wurstmeister' image
+--run 1 zookeeper container and 3 kafka broker containers, although all of these on 1 machine.
+
+#create a directory 'kafka-installation4'
+#create a file 'docker-compose.yml' in this directory
+
+contents of 'docker-compose.yml' as provided in 'kafka-installation4'
+--
+--
+Note**
+Being logged in root OR using sudo command update '/etc/hosts'
+ipaddress1 kafka1.test.local
+ipaddress1 kafka2.test.local  
+ipaddress1 kafka3.test.local
+
+Note** Above steps are needed,as 
+we will have 3 kafka containers and 1 zookeeper container,all running 
+on 1 machine with different ports.
+
+#to pull images and start the container
+$docker-compose -f docker-compose.yml up
+
+#to run containers in background
+$docker-compose -f docker-compose.yml up -d
+
+$docker container ls
+
+$docker-compose ps
+
+#install telnet
+
+$telnet localhost 12181
+<ctrl+c>
+
+#once you have your container running, you can get its name from 'docker container ls' command 
+& connect to it.
+
+#to connect to kafka cluster from CLI
+$docker exec  -it kafkainstallation2_kafka-1_1 /bin/bash
+
+sh-4.4$ls /
+sh-4.4$ls /bin
+
+sh-4.4$kafka-topics --list --bootstrap-server localhost:19092
+
+sh-4.4$kafka-topics --create --topic Test1 --bootstrap-server localhost:19092 --partitions 3 --replication-factor 3
+
+sh-4.4$kafka-topics --list --bootstrap-server localhost:19092
+
+sh-4.4$kafka-topics --describe --bootstrap-server localhost:19092
+
+
+
+
