@@ -3,6 +3,6 @@
 -When trying or testing any of examples here, please read through the complete file before starting..
 -All files (if used for work) should be found in my 'datasets' repository.
 
->>>> Content is being reviewed & updated
+> 🚧 This repository is currently being refined and improved. Stay tuned!
 =======
--Some files/codes/scripts are envolving,so may need changes based on versions
+-Some files/codes/scripts are always evolving,so may need changes based on versions used.
