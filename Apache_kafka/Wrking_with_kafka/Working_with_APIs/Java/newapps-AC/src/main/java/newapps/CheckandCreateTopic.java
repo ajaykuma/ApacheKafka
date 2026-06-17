@@ -36,7 +36,7 @@ public class CheckandCreateTopic {
    // check if our demo topic exists, create it if it doesn't
       DescribeTopicsResult ourTopic = admin.describeTopics(TOPIC_LIST);
       try {
-          topicDescription = ourTopic.values().get(TOPIC_NAME).get();
+          topicDescription = ourTopic.topicNameValues().get(TOPIC_NAME).get();
           System.out.println("Topic exists");
           
           System.out.println("Description of our topic:" + '\n' + topicDescription);

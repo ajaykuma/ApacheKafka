@@ -2,7 +2,7 @@ package newapps;
 
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.AdminClientConfig;
-import org.apache.kafka.clients.admin.AlterConfigOp;
+//import org.apache.kafka.clients.admin.AlterConfigOp;
 import org.apache.kafka.clients.admin.Config;
 import org.apache.kafka.clients.admin.ConfigEntry;
 import org.apache.kafka.clients.admin.DescribeConfigsResult;
@@ -12,12 +12,12 @@ import org.apache.kafka.clients.admin.TopicListing;
 import org.apache.kafka.common.config.ConfigResource;
 import org.apache.kafka.common.config.TopicConfig;
 
-import java.util.ArrayList;
-import java.util.Collection;
+//import java.util.ArrayList;
+//import java.util.Collection;
 import java.util.Collections;
-import java.util.HashMap;
+//import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
+//import java.util.Map;
 //import java.util.Collection;
 import java.util.Properties;
 import java.util.concurrent.ExecutionException;

@@ -2,23 +2,23 @@ package newapps;
 
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.AdminClientConfig;
-import org.apache.kafka.clients.admin.AlterConfigOp;
-import org.apache.kafka.clients.admin.Config;
-import org.apache.kafka.clients.admin.ConfigEntry;
-import org.apache.kafka.clients.admin.DescribeConfigsResult;
+//import org.apache.kafka.clients.admin.AlterConfigOp;
+//import org.apache.kafka.clients.admin.Config;
+//import org.apache.kafka.clients.admin.ConfigEntry;
+//import org.apache.kafka.clients.admin.DescribeConfigsResult;
 import org.apache.kafka.clients.admin.DescribeTopicsResult;
 //import org.apache.kafka.clients.admin.DescribeTopicsOptions;
 //import org.apache.kafka.clients.admin.DescribeTopicsResult;
 import org.apache.kafka.clients.admin.TopicListing;
-import org.apache.kafka.common.config.ConfigResource;
-import org.apache.kafka.common.config.TopicConfig;
+//import org.apache.kafka.common.config.ConfigResource;
+//import org.apache.kafka.common.config.TopicConfig;
 
-import java.util.ArrayList;
-import java.util.Collection;
+//import java.util.ArrayList;
+//import java.util.Collection;
 import java.util.Collections;
-import java.util.HashMap;
+//import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
+//import java.util.Map;
 //import java.util.Collection;
 import java.util.Properties;
 import java.util.concurrent.ExecutionException;
@@ -43,11 +43,11 @@ public class DeleteTopics {
       // it is possible that at this point the topic still exists
       DescribeTopicsResult OurTopic = admin.describeTopics(TOPIC_LIST);
       try {
-          OurTopic.values().get(TOPIC_NAME).get(); // just to get the exception when topic doesn't exist
-          System.out.println("Topic " + TOPIC_NAME + " is still around");
-      } catch (ExecutionException e) {
-          System.out.println("Topic " + TOPIC_NAME + " is gone");
-      }
+    	    OurTopic.topicNameValues().get(TOPIC_NAME).get();
+    	    System.out.println("Topic " + TOPIC_NAME + " is still around");
+    	} catch (ExecutionException e) {
+    	    System.out.println("Topic " + TOPIC_NAME + " is gone");
+    	}
 
 
   }
