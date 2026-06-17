@@ -107,8 +107,14 @@ __consumer_offsets
 streams-plaintext-input
 streams-wordcount-output
 
-Step1: from within your cluster
-     -- $java -jar streamsapp-0.0.1-SNAPSHOT.jar
+Step1: 
+from streamsapp project:
+C:\Users\Ajay\Downloads\Kafka_work\Streamsapp>mvn clean package -DskipTests
+--should have created jar in Target folder.
+C:\Users\Ajay\Downloads\Kafka_work\Streamsapp>mvnw.cmd spring-boot:run
+
+or from one of the nodes of your cluster
+C:\Users\Ajay\Downloads\Kafka_work\Streamsapp>java -jar target\\streamsapp-0.0.1-SNAPSHOT.jar
      -- This starts your streaming wordcount application
 
 Step2: Start Producer
