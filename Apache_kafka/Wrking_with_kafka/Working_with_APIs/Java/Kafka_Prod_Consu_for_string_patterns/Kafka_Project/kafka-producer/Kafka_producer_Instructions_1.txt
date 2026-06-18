@@ -1,0 +1,165 @@
+#Building your kafka-producer application
+#Tested on windows, make changes accordingly if usig linux
+------------------------
+spring initializer > https://start.spring.io/
+Project: Maven Project
+Language: Java
+Spring Boot: 2.5.4
+Project Metadata
+Group: com.example.kafka
+Artifact: kafka-producer
+Name: kafka-producer
+Description: Building producer app
+Package name: com.example.kafka.kafka-producer
+
+Packaging: Jar
+Java: 8
+
+Dependencies:
+Spring Web
+Spring Boot DevTools
+Spring for Apache Kafka
+Spring for Apache Kafka Streams
+
+click on generate and download the zip folder
+unzip the folder
+-----------
+eclipse> import maven projects > kafka-producer 
+----------
+setup your eclipse
+Note** Your project might show a small yellow alert symbol
+right click on project > build path > Java Build Path > Libraries 
+--while JRE System library is selected > click on edit
+--select 'workspace default jre '(points to your jdk on machine)
+
+-----------
+In project >
+src/main/java shows your package
+expand package to find your main application:KafkaProducerApplication
+
+Now create your 'ProducerController' and then using an API we can publish message.
+To publish message we need to use KafkaTemplate
+
+Code of ProducerController.java
+#when sending a string message
+-----
+package com.example.kafka.kafkaproducer;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+public class ProducerController {
+	
+	@Autowired
+	KafkaTemplate<String, String> kafkaTemplate;
+	
+	private static final String TOPIC = "Topic1";
+	
+	@GetMapping("/publish/{message}")
+	public String publishMessage(@PathVariable("message") final String message)
+	{
+		kafkaTemplate.send(TOPIC, message);
+		return "Published Successfully";  
+	}
+}
+-----
+Code of KafkaConfiguration.java
+#when sending a string message
+
+----
+package com.example.kafka.kafkaproducer;
+
+import java.util.HashMap;
+import java.util.Map;
+
+import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.common.serialization.StringSerializer;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.kafka.core.DefaultKafkaProducerFactory;
+import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.kafka.core.ProducerFactory;
+
+
+/*to be loaded during spring-boot initialization*/
+@Configuration
+public class KafkaConfiguration {
+	
+	/*creating a bean*/
+	@Bean
+	public ProducerFactory<String, String> producerFactory() {
+		Map<String, Object> config = new HashMap<>();
+		config.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092");
+		config.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+		config.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+		
+		return new DefaultKafkaProducerFactory<String, String>(config);
+	}
+	@Bean
+	public KafkaTemplate<String, String> kafkaTemplate(){
+		return new KafkaTemplate<>(producerFactory());
+}
+	}
+ ----
+
+edit and update src>main>resources>application.properties
+server.port=8080
+
+#To Test application ( without dockers/containers)
+--start your kafka cluster (this can be standalone setup of kafka with embedded zookeeper)
+--run your application from IDE
+--Once Producer is running, check console:
+
+----sampleoutput----
+Starting service [Tomcat]
+ Starting Servlet engine: [Apache Tomcat/9.0.52]
+[Tomcat].[localhost].[/]       : Initializing Spring embedded WebApplicationContext
+ w.s.c.ServletWebServerApplicationContext : Root WebApplicationContext: initialization completed in 1259 ms
+o.s.b.d.a.OptionalLiveReloadServer       : LiveReload server is running on port 35729
+ o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat started on port(s): 8080 (http) with context path ''
+c.e.k.k.KafkaProducerApplication         : Started KafkaProducerApplication in 2.233 seconds (JVM running for 2.704)
+----outputends------
+
+--open a browser and publish messages
+http://localhost:8080/publish/msg1
+http://localhost:8080/publish/msg2
+http://localhost:8080/publish/msg3
+http://localhost:8080/publish/msg4
+
+or from terminal
+[hdu@c1 ~]$ curl http://localhost:8080/publish/msg1
+Published Successfully
+[hdu@c1 ~]$ curl http://localhost:8080/publish/msg2
+Published Successfully[hdu@c1 ~]$ 
+
+--see if you 'published successfully'
+--access topic and check if messages were published..
+(this can be done using kafka-console-consumer.sh from command line or by a consumer application)
+
+#Packaging your appl into a jar
+right click on project > maven install
+--check for msgs
+----samepleoutput----
+[INFO] Installing I:\kafka-producer\target\kafka-producer-0.0.1-SNAPSHOT.jar to C:\Users\Win10\.m2\repository\com\example\kafka\kafka-producer\0.0.1-SNAPSHOT\kafka-producer-0.0.1-SNAPSHOT.jar
+[INFO] Installing I:\kafka-producer\pom.xml to C:\Users\Win10\.m2\repository\com\example\kafka\kafka-producer\0.0.1-SNAPSHOT\kafka-producer-0.0.1-SNAPSHOT.pom
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+-----outputends------
+
+--check if jar was created..
+--this jar can be used to build docker images
+NOTE** refer 'kafka_consumer_Instructions.txt' to create a consumer application to read string messages.
+
+===========================
+Additional: If you would want to build producer application to send JSON messages to kafka
+refer : Kafka_producer_Instructions_2.txt
+
+
+
+
+
+
+

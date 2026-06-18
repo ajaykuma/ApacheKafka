@@ -1,0 +1,141 @@
+#Building your kafka-consumer application
+#Tested on windows ,if using linux make changes accordingly
+------------------------
+https://start.spring.io/
+Project: Maven Project
+Language: Java
+Spring Boot: 2.5.4
+Project Metadata
+Group: com.example.kafka
+Artifact: kafka-consumer
+Name: kafka-consumer
+Description: Building producer app
+Package name: com.example.kafka.kafka-consumer
+
+Packaging: Jar
+Java: 8
+
+Dependencies:
+Spring Web
+Spring Boot DevTools
+Spring for Apache Kafka
+Spring for Apache Kafka Streams
+
+click on generate and download the zip folder
+unzip the folder
+-----------
+eclipse> import maven projects > kafka-consumer
+----------
+setup your eclipse
+Note** Your project might show a small yellow alert symbol
+right click on project > build path > Java Build Path > Libraries 
+--while JRE System library is selected > click on edit
+--select 'workspace default jre '(points to your jdk on machine)
+
+-----------
+In project >
+src/main/java shows your package
+expand package to find your main application:KafkaConsumerApplication
+
+Now create your 'ConsumerController' and then using an API we can publish message.
+To publish message we need to use KafkaTemplate
+
+Code of ConsumerController.java
+
+-----
+package com.example.kafka.kafkaconsumer;
+
+import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.stereotype.Component;
+
+@Component
+public class ConsumerController {
+	
+	@KafkaListener(topics= "topic1",groupId = "group_id")
+	public void consumer(String message) 
+	{
+		System.out.println("message = " + message);
+	}
+
+}
+-----
+
+edit and update src>main>resources>application.properties
+server.port=8081
+
+Create KafkaConfig.java
+#to consume string messages..
+----
+package com.example.kafka.kafkaconsumer;
+
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.kafka.annotation.EnableKafka;
+import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
+import org.springframework.kafka.core.ConsumerFactory;
+import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
+
+import java.util.HashMap;
+import java.util.Map;
+
+@EnableKafka
+@Configuration
+public class KafkaConfig {
+	
+	@Bean
+	public ConsumerFactory<String, String> consumerFactory()
+	{
+		
+		Map<String, Object> config = new HashMap<>();
+		
+		config.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, "c1:9092");
+		config.put(ConsumerConfig.GROUP_ID_CONFIG, "group_id");
+		/*additionally we can mention which DeSerializer to use, although for string not required*/		
+		return new DefaultKafkaConsumerFactory<>(config);
+	}	
+	@Bean
+	public ConcurrentKafkaListenerContainerFactory<String, String> concurrentKafkaListenerContainerFactory()
+	{
+		ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
+		factory.setConsumerFactory(consumerFactory());
+		return factory;
+	
+	}
+}
+
+-----
+#To Test application ( without dockers/containers)
+--start your kafka cluster (this can be standalone setup of kafka with embedded zookeeper)
+--run your application from IDE
+--Once Consumer is running, check console:
+
+----sampleoutput----
+Started KafkaConsumerApplication in....
+----outputends------
+
+Now using kafka-console-producer CLI command or run the kafka-producer application >
+push msgs to the topic (as mentioned in producer instructions) and see if your consumer receives them..
+(Note**kafka cluster and your consumer app is running)
+
+#Packaging your appl into a jar
+right click on project > maven install
+--check for msgs
+----samepleoutput----
+[INFO] Installing I:\kafka-consumer\target\kafka-consumer-0.0.1-SNAPSHOT.jar to C:\Users\Win10\.m2\repository\com\example\kafka\kafka-consumer\0.0.1-SNAPSHOT\kafka-consumer-0.0.1-SNAPSHOT.jar
+[INFO] Installing I:\kafka-consumer\pom.xml to C:\Users\Win10\.m2\repository\com\example\kafka\kafka-consumer\0.0.1-SNAPSHOT\kafka-consumer-0.0.1-SNAPSHOT.pom
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+-----outputends------
+
+--check if jar was created..
+These jars can be used to build our own docker images.
+===========================
+Additional:
+By default in KafkaTemplate all serialization is for 'string'
+--passing JSON objects into kafka
+--To change template bindings/serializations to desired objects
+
+refer: Kafka_consumer_Instructions_2.txt
+
+
