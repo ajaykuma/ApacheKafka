@@ -11,7 +11,7 @@ public class ProducerController {
 	
 	@Autowired
 	KafkaTemplate<String, String> kafkaTemplate;	
-	private static final String TOPIC = "Topic5";
+	private static final String TOPIC = "Topic1";
 	
 	@GetMapping("/publish/{message}")
 	public String publishMessage(@PathVariable("message") final String message)
