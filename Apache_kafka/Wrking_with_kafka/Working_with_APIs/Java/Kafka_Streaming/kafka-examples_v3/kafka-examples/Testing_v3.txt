@@ -1,0 +1,202 @@
+advanced/errorhandling/
+  StreamsErrorHandling.java   ← topology with all 4 error strategies
+  ErrorProducer.java          ← sends 14 records: 6 valid, 4 invalid, 4 malformed
+
+advanced/restapi/
+  InventoryRestApi.java       ← Streams topology + embedded HTTP server on port 7070
+  InventoryEventProducer.java ← sends inventory events in 3 phases
+
+test/advanced/
+  AdvancedTopologyTests.java  ← 11 new tests (5 error handling + 5 inventory + 1 EOS)
+
+------------------------
+from project v3 - mvn test
+28 green tests (17 before + 11 new)
+------------------------
+
+#Error handling
+
+Terminal 1:
+mvn exec:java -Dexec.mainClass="com.kafka.examples.advanced.errorhandling.StreamsErrorHandling"
+--Error handling topology started. Run ErrorProducer in another terminal.
+
+C:\Users\Ajay\Downloads\kafka-examples_v3\kafka-examples>mvn exec:java -Dexec.mainClass="com.kafka.examples.advanced.errorhandling.StreamsErrorHandling"
+[INFO] Scanning for projects...
+[INFO]
+[INFO] -----------------< com.kafka.examples:kafka-examples >------------------
+[INFO] Building Kafka Enterprise Examples 1.0.0
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO]
+[INFO] --- exec:3.2.0:java (default-cli) @ kafka-examples ---
+13:27:46.055 [com.kafka.examples.advanced.errorhandling.StreamsErrorHandling.main()] INFO  c.k.e.config.KafkaConfig - Γ£à Created topic: errorhandling.orders.input
+13:27:46.060 [com.kafka.examples.advanced.errorhandling.StreamsErrorHandling.main()] INFO  c.k.e.config.KafkaConfig - Γ£à Created topic: errorhandling.orders.output
+13:27:46.062 [com.kafka.examples.advanced.errorhandling.StreamsErrorHandling.main()] INFO  c.k.e.config.KafkaConfig - Γ£à Created topic: errorhandling.orders.DLT
+13:27:46.330 [com.kafka.examples.advanced.errorhandling.StreamsErrorHandling.main()] INFO  c.k.e.a.e.StreamsErrorHandling - ≡ƒöä Streams state: CREATED ΓåÆ REBALANCING
+13:27:46.331 [com.kafka.examples.advanced.errorhandling.StreamsErrorHandling.main()] INFO  c.k.e.a.e.StreamsErrorHandling - Γ£à Error handling topology started. Run ErrorProducer in another terminal.
+13:27:46.466 [streams-error-handling-63f2ff90-9025-42c3-9791-64c05b1a998e-StreamThread-1] INFO  c.k.e.a.e.StreamsErrorHandling - ≡ƒöä Streams state: REBALANCING ΓåÆ RUNNING
+
+Terminal 2:
+mvn exec:java -Dexec.mainClass="com.kafka.examples.advanced.errorhandling.ErrorProducer"
+C:\Users\Ajay\Downloads\kafka-examples_v3\kafka-examples>mvn exec:java -Dexec.mainClass="com.kafka.examples.advanced.errorhandling.ErrorProducer"
+[INFO] Scanning for projects...
+[INFO]
+[INFO] -----------------< com.kafka.examples:kafka-examples >------------------
+[INFO] Building Kafka Enterprise Examples 1.0.0
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO]
+[INFO] --- exec:3.2.0:java (default-cli) @ kafka-examples ---
+13:28:29.685 [com.kafka.examples.advanced.errorhandling.ErrorProducer.main()] INFO  c.k.e.config.KafkaConfig - Topics already exist, skipping creation
+13:28:29.763 [com.kafka.examples.advanced.errorhandling.ErrorProducer.main()] INFO  c.k.e.a.e.ErrorProducer - Publishing VALID orders...
+13:28:30.101 [kafka-producer-network-thread | producer-1] INFO  c.k.e.a.e.ErrorProducer - ≡ƒôñ VALID: ORD-EH-003
+13:28:30.102 [kafka-producer-network-thread | producer-1] INFO  c.k.e.a.e.ErrorProducer - ≡ƒôñ VALID: ORD-EH-002
+13:28:30.108 [kafka-producer-network-thread | producer-1] INFO  c.k.e.a.e.ErrorProducer - ≡ƒôñ VALID: ORD-EH-001
+13:28:30.109 [kafka-producer-network-thread | producer-1] INFO  c.k.e.a.e.ErrorProducer - ≡ƒôñ VALID: ORD-EH-004
+13:28:30.307 [com.kafka.examples.advanced.errorhandling.ErrorProducer.main()] INFO  c.k.e.a.e.ErrorProducer - Publishing INVALID orders (business rule violations)...
+13:28:30.314 [kafka-producer-network-thread | producer-1] WARN  c.k.e.a.e.ErrorProducer - ≡ƒôñ INVALID: ORD-EH-005
+13:28:30.314 [kafka-producer-network-thread | producer-1] WARN  c.k.e.a.e.ErrorProducer - ≡ƒôñ INVALID: ORD-EH-006
+13:28:30.314 [kafka-producer-network-thread | producer-1] WARN  c.k.e.a.e.ErrorProducer - ≡ƒôñ INVALID: ORD-EH-007
+13:28:30.315 [kafka-producer-network-thread | producer-1] WARN  c.k.e.a.e.ErrorProducer - ≡ƒôñ INVALID: ORD-EH-008
+13:28:30.616 [com.kafka.examples.advanced.errorhandling.ErrorProducer.main()] INFO  c.k.e.a.e.ErrorProducer - Publishing MALFORMED records (not JSON)...
+13:28:30.625 [kafka-producer-network-thread | producer-1] WARN  c.k.e.a.e.ErrorProducer - ≡ƒôñ MALFORMED: ORD-EH-011
+13:28:30.626 [kafka-producer-network-thread | producer-1] WARN  c.k.e.a.e.ErrorProducer - ≡ƒôñ MALFORMED: ORD-EH-009
+13:28:30.626 [kafka-producer-network-thread | producer-1] WARN  c.k.e.a.e.ErrorProducer - ≡ƒôñ MALFORMED: ORD-EH-012
+13:28:30.628 [kafka-producer-network-thread | producer-1] WARN  c.k.e.a.e.ErrorProducer - ≡ƒôñ MALFORMED: ORD-EH-010
+13:28:30.929 [com.kafka.examples.advanced.errorhandling.ErrorProducer.main()] INFO  c.k.e.a.e.ErrorProducer - Publishing more VALID orders (proves topology survived bad records)...
+13:28:30.938 [kafka-producer-network-thread | producer-1] INFO  c.k.e.a.e.ErrorProducer - ≡ƒôñ VALID (post-error): ORD-EH-013
+13:28:30.940 [kafka-producer-network-thread | producer-1] INFO  c.k.e.a.e.ErrorProducer - ≡ƒôñ VALID (post-error): ORD-EH-014
+13:28:30.940 [com.kafka.examples.advanced.errorhandling.ErrorProducer.main()] INFO  c.k.e.a.e.ErrorProducer -
+Γ£à All records published.
+13:28:30.941 [com.kafka.examples.advanced.errorhandling.ErrorProducer.main()] INFO  c.k.e.a.e.ErrorProducer -    Expected in output topic: ORD-EH-001,002,003,004,013,014 (6 valid)
+13:28:30.941 [com.kafka.examples.advanced.errorhandling.ErrorProducer.main()] INFO  c.k.e.a.e.ErrorProducer -    Expected in DLT topic:    ORD-EH-005,006,007,008,009,010,011,012 (8 invalid)
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  2.774 s
+[INFO] Finished at: 2026-06-13T13:28:30+02:00
+[INFO] ------------------------------------------------------------------------
+
+Watch terminal 1:
+[VALID] lines — 6 records processed and written to output topic
+[DLT] lines — 8 bad records routed to DLT with reasons
+Topology stays alive after all the bad records — that's the key point
+
+Conclusion:
+6 valid orders → output topic with VAT calculated:
+Order			Amount			VAT (19%)			Total
+ORD-EH-001		149.9928.50178.49
+ORD-EH-002		299.0056.81355.81
+ORD-EH-003		49.959.4959.44
+ORD-EH-004		1299.00246.811545.81
+ORD-EH-013 		post-error
+ORD-EH-014 		post-error
+
+8 bad records → DLT with exact failure reasons:
+Order		Reason
+ORD-EH-005	INVALID_AMOUNT_-50.0
+ORD-EH-006	INVALID_QUANTITY_-1
+ORD-EH-007	MISSING_CUSTOMER_ID
+ORD-EH-008	INVALID_AMOUNT_0.0
+ORD-EH-009	NOT_JSON
+ORD-EH-010	PARSE_ERROR: {{broken json::
+ORD-EH-011	empty string
+ORD-EH-012	literal null
+
+The critical point: ORD-EH-013 and ORD-EH-014 processed successfully AFTER all 8 bad records. The topology never crashed, never paused — 
+bad records were routed out cleanly and processing continued. That's exactly what LogAndContinueExceptionHandler + branch-based DLT routing gives you.
+
+-----------------------------------------------------
+
+#Interactive Queries REST API
+Terminal 1:
+mvn exec:java -Dexec.mainClass="com.kafka.examples.advanced.restapi.InventoryRestApi"
+--wait REST API started on http://localhost:7070
+C:\Users\Ajay\Downloads\kafka-examples_v3\kafka-examples>mvn exec:java -Dexec.mainClass="com.kafka.examples.advanced.restapi.InventoryRestApi"
+[INFO] Scanning for projects...
+[INFO]
+[INFO] -----------------< com.kafka.examples:kafka-examples >------------------
+[INFO] Building Kafka Enterprise Examples 1.0.0
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO]
+[INFO] --- exec:3.2.0:java (default-cli) @ kafka-examples ---
+13:31:43.280 [com.kafka.examples.advanced.restapi.InventoryRestApi.main()] INFO  c.k.e.config.KafkaConfig - Γ£à Created topic: restapi.inventory.events
+13:31:43.381 [com.kafka.examples.advanced.restapi.InventoryRestApi.main()] ERROR o.a.k.s.p.i.StateDirectory - Failed to change permissions for the directory \tmp\kafka-streams-examples
+13:31:43.381 [com.kafka.examples.advanced.restapi.InventoryRestApi.main()] ERROR o.a.k.s.p.i.StateDirectory - Failed to change permissions for the directory \tmp\kafka-streams-examples\inventory-rest-api
+13:31:44.783 [com.kafka.examples.advanced.restapi.InventoryRestApi.main()] INFO  c.k.e.a.r.InventoryRestApi - Γ£à Kafka Streams RUNNING
+13:31:44.817 [com.kafka.examples.advanced.restapi.InventoryRestApi.main()] INFO  c.k.e.a.r.InventoryRestApi - Γ£à REST API started on http://localhost:7070
+13:31:44.819 [com.kafka.examples.advanced.restapi.InventoryRestApi.main()] INFO  c.k.e.a.r.InventoryRestApi -    Endpoints:
+13:31:44.822 [com.kafka.examples.advanced.restapi.InventoryRestApi.main()] INFO  c.k.e.a.r.InventoryRestApi -    GET http://localhost:7070/api/products
+13:31:44.822 [com.kafka.examples.advanced.restapi.InventoryRestApi.main()] INFO  c.k.e.a.r.InventoryRestApi -    GET http://localhost:7070/api/products/PROD-A1
+13:31:44.828 [com.kafka.examples.advanced.restapi.InventoryRestApi.main()] INFO  c.k.e.a.r.InventoryRestApi -    GET http://localhost:7070/api/products/low-stock
+13:31:44.829 [com.kafka.examples.advanced.restapi.InventoryRestApi.main()] INFO  c.k.e.a.r.InventoryRestApi -    GET http://localhost:7070/api/stats
+13:31:44.829 [com.kafka.examples.advanced.restapi.InventoryRestApi.main()] INFO  c.k.e.a.r.InventoryRestApi -    Run InventoryEventProducer to populate the store.
+
+Terminal 2:
+mvn exec:java -Dexec.mainClass="com.kafka.examples.advanced.restapi.InventoryEventProducer"
+C:\Users\Ajay\Downloads\kafka-examples_v3\kafka-examples>
+C:\Users\Ajay\Downloads\kafka-examples_v3\kafka-examples>mvn exec:java -Dexec.mainClass="com.kafka.examples.advanced.restapi.InventoryEventProducer"
+[INFO] Scanning for projects...
+[INFO]
+[INFO] -----------------< com.kafka.examples:kafka-examples >------------------
+[INFO] Building Kafka Enterprise Examples 1.0.0
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO]
+[INFO] --- exec:3.2.0:java (default-cli) @ kafka-examples ---
+13:32:22.505 [com.kafka.examples.advanced.restapi.InventoryEventProducer.main()] INFO  c.k.e.config.KafkaConfig - Topics already exist, skipping creation
+13:32:22.582 [com.kafka.examples.advanced.restapi.InventoryEventProducer.main()] INFO  c.k.e.a.r.InventoryEventProducer - Phase 1: Initial stock intake...
+13:32:22.836 [kafka-producer-network-thread | producer-1] INFO  c.k.e.a.r.InventoryEventProducer - ≡ƒôñ STOCK_IN PROD-A1 qty=50
+13:32:22.837 [kafka-producer-network-thread | producer-1] INFO  c.k.e.a.r.InventoryEventProducer - ≡ƒôñ STOCK_IN PROD-B3 qty=30
+13:32:22.839 [kafka-producer-network-thread | producer-1] INFO  c.k.e.a.r.InventoryEventProducer - ≡ƒôñ STOCK_IN PROD-C7 qty=100
+13:32:22.840 [kafka-producer-network-thread | producer-1] INFO  c.k.e.a.r.InventoryEventProducer - ≡ƒôñ STOCK_IN PROD-D2 qty=25
+13:32:22.840 [kafka-producer-network-thread | producer-1] INFO  c.k.e.a.r.InventoryEventProducer - ≡ƒôñ STOCK_IN PROD-E9 qty=15
+13:32:23.855 [com.kafka.examples.advanced.restapi.InventoryEventProducer.main()] INFO  c.k.e.a.r.InventoryEventProducer - ΓåÆ Query now: http://localhost:7070/api/products
+13:32:23.857 [com.kafka.examples.advanced.restapi.InventoryEventProducer.main()] INFO  c.k.e.a.r.InventoryEventProducer - Phase 2: Sales activity...
+13:32:23.877 [kafka-producer-network-thread | producer-1] INFO  c.k.e.a.r.InventoryEventProducer - ≡ƒôñ STOCK_OUT PROD-A1 qty=35
+13:32:23.878 [kafka-producer-network-thread | producer-1] INFO  c.k.e.a.r.InventoryEventProducer - ≡ƒôñ STOCK_OUT PROD-B3 qty=12
+13:32:23.880 [kafka-producer-network-thread | producer-1] INFO  c.k.e.a.r.InventoryEventProducer - ≡ƒôñ STOCK_OUT PROD-C7 qty=5
+13:32:23.881 [kafka-producer-network-thread | producer-1] INFO  c.k.e.a.r.InventoryEventProducer - ≡ƒôñ STOCK_OUT PROD-D2 qty=20
+13:32:24.897 [com.kafka.examples.advanced.restapi.InventoryEventProducer.main()] INFO  c.k.e.a.r.InventoryEventProducer - ΓåÆ Query now: http://localhost:7070/api/products/low-stock
+13:32:24.898 [com.kafka.examples.advanced.restapi.InventoryEventProducer.main()] INFO  c.k.e.a.r.InventoryEventProducer - Phase 3: Restocking...
+13:32:24.918 [kafka-producer-network-thread | producer-1] INFO  c.k.e.a.r.InventoryEventProducer - ≡ƒôñ STOCK_IN PROD-A1 qty=100
+13:32:24.920 [kafka-producer-network-thread | producer-1] INFO  c.k.e.a.r.InventoryEventProducer - ≡ƒôñ STOCK_IN PROD-E9 qty=50
+13:32:24.921 [kafka-producer-network-thread | producer-1] INFO  c.k.e.a.r.InventoryEventProducer - ≡ƒôñ ADJUSTMENT PROD-C7 qty=200
+13:32:25.927 [com.kafka.examples.advanced.restapi.InventoryEventProducer.main()] INFO  c.k.e.a.r.InventoryEventProducer - ΓåÆ Query now: http://localhost:7070/api/stats
+13:32:25.928 [com.kafka.examples.advanced.restapi.InventoryEventProducer.main()] INFO  c.k.e.a.r.InventoryEventProducer -
+Γ£à All inventory events published.
+13:32:25.930 [com.kafka.examples.advanced.restapi.InventoryEventProducer.main()] INFO  c.k.e.a.r.InventoryEventProducer -    REST API is still running ΓÇö keep querying:
+13:32:25.931 [com.kafka.examples.advanced.restapi.InventoryEventProducer.main()] INFO  c.k.e.a.r.InventoryEventProducer -    http://localhost:7070/api/products
+13:32:25.933 [com.kafka.examples.advanced.restapi.InventoryEventProducer.main()] INFO  c.k.e.a.r.InventoryEventProducer -    http://localhost:7070/api/products/PROD-A1
+13:32:25.934 [com.kafka.examples.advanced.restapi.InventoryEventProducer.main()] INFO  c.k.e.a.r.InventoryEventProducer -    http://localhost:7070/api/products/low-stock
+13:32:25.935 [com.kafka.examples.advanced.restapi.InventoryEventProducer.main()] INFO  c.k.e.a.r.InventoryEventProducer -    http://localhost:7070/api/stats
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  4.894 s
+[INFO] Finished at: 2026-06-13T13:32:25+02:00
+[INFO] ------------------------------------------------------------------------
+
+outputs from browser:
+
+http://localhost:7070/api/products
+[{"productId":"PROD-B3","productName":"Wireless Keyboard","currentStock":18,"totalIn":30,"totalOut":12,"eventCount":2,
+"lastUpdated":"2026-06-13T11:32:23.881175800Z"},{"productId":"PROD-C7","productName":"USB-C Hub","currentStock":200,
+"totalIn":100,"totalOut":5,"eventCount":3,"lastUpdated":"2026-06-13T11:32:24.925178800Z"},{"productId":"PROD-D2",
+"productName":"Monitor Arm","currentStock":5,"totalIn":25,"totalOut":20,"eventCount":2,
+"lastUpdated":"2026-06-13T11:32:23.887157900Z"},{"productId":"PROD-E9","productName":"Desk Lamp",
+"currentStock":65,"totalIn":65,"totalOut":0,"eventCount":2,"lastUpdated":"2026-06-13T11:32:24.924178900Z"},
+{"productId":"PROD-A1","productName":"Laptop Stand","currentStock":115,"totalIn":150,"totalOut":35,"eventCount":3,
+"lastUpdated":"2026-06-13T11:32:24.928166800Z"}]
+
+http://localhost:7070/api/products/low-stock
+{"threshold":20,"count":2,"products":[{"productId":"PROD-B3","productName":"Wireless Keyboard","currentStock":18,"totalIn":30,"totalOut":12,
+"eventCount":2,"lastUpdated":"2026-06-13T11:32:23.881175800Z"},{"productId":"PROD-D2","productName":"Monitor Arm","currentStock":5,"totalIn":25,
+"totalOut":20,"eventCount":2,"lastUpdated":"2026-06-13T11:32:23.887157900Z"}]}
+
+http://localhost:7070/api/products/PROD-A1
+{"productId":"PROD-A1","productName":"Laptop Stand","currentStock":115,"totalIn":150,"totalOut":35,"eventCount":3,"lastUpdated":"2026-06-13T11:32:24.928166800Z"}
+
+http://localhost:7070/api/stats
+{"streamsState":"RUNNING","productCount":12,"totalStockUnits":403,"lowStockThreshold":20,"timestamp":"2026-06-13T11:34:41.547961900Z"}

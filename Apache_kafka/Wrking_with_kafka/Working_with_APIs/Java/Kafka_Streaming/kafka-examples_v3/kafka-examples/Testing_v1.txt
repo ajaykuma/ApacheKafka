@@ -1,0 +1,1274 @@
+Section                        	 Class(es)                       				What it demonstrates
+2A  EventDrivenProducer + EventDrivenConsumer	Domain events, multi-group consumers, DLT, manual commit
+2B  OrderEnrichmentPipeline + EnrichmentVerifier	KStream-KTable join, enrichment, left-join fallback
+2C  IngestionPipeline	Batched ingestion, schema validation at boundary, routing, DLT
+2D  AsyncDataSharing	Warehouse + shipment decoupling, 4 independent consumer groups
+3.2a KStreamOperations + SensorDataProducer	filter, map, flatMap, branch, merge, peek, selectKey
+3.2b JoinExamples + JoinDataProducer	All 3 join types — KStream-KStream, KStream-KTable, GlobalKTable
+3.3  WindowingExamples + ClickEventProducer	Tumbling, Hopping, Session windows + suppress()
+3.4  StateStoreExamples + StockPriceProducer	Custom aggregate(), RocksDB store, Interactive Queries
+Tests  TopologyTests				10 unit tests with TopologyTestDriver — no Kafka needed
+
+cd kafka-examples 
+mvn clean compile # downloads deps, should be clean 
+mvn test # runs all 10 topology tests without Kafka
+
+-----------------------
+Kafka on Windows
+#default settings
+
+#start zookeeper
+E:\kafka_2.13-2.8.1\bin\windows>zookeeper-server-start.bat ..\\..\\config\\zookeeper.properties
+
+#kafka will connect to embedded zookeeper,thus no changes required to server.properties 
+E:\kafka_2.13-2.8.1\bin\windows>kafka-server-start.bat ..\\..\\config\\server.properties
+
+#Verify Kafka is reachable
+#Testing kafka
+E:\kafka_2.13-2.8.1\bin\windows>kafka-topics.bat --list --bootstrap-server localhost:9092
+
+
+E:\kafka_2.13-2.8.1\bin\windows>kafka-topics.bat --create --topic test1 --bootstrap-server localhost:9092 --partitions 1
+Created topic test1.
+
+E:\kafka_2.13-2.8.1\bin\windows>kafka-topics.bat --list --bootstrap-server localhost:9092
+test1
+
+E:\kafka_2.13-2.8.1\bin\windows>kafka-topics.bat --describe --bootstrap-server localhost:9092
+Topic: test1    TopicId: GiyzayfkRAKt0Jhikl1S2Q PartitionCount: 1       ReplicationFactor: 1    Configs: segment.bytes=1073741824
+        Topic: test1    Partition: 0    Leader: 0       Replicas: 0     Isr: 0
+
+-----------------------
+#Run the unit tests first (no Kafka needed)
+From project folder:
+mvn test
+
+--This runs all 10 TopologyTestDriver tests completely in-memory. 
+  It proves the topology logic is correct before you touch a live broker. You should see 10 tests passing.
+
+Notes**
+how a KStream-KTable left join behaves in Kafka Streams:
+When using TopologyTestDriver, if no record has ever been written to the KTable topic before the stream record arrives, the left 
+join produces no output at all — not even a null-profile record.
+
+In a real running cluster, the left join would emit with a null right-side. But TopologyTestDriver 
+processes records synchronously and the KTable state store is completely empty for CUST-999, so Kafka Streams silently drops it rather
+than emitting with null.
+
+So in Test: To match the real behaviour — assert the output IS empty for an unknown customer in the test driver, 
+and a comment that explains the real-cluster behaviour.
+
+Remember: TopologyTestDriver is synchronous and strict — it only joins what's already in the store at the exact moment the record arrives. 
+A real Kafka cluster has eventual consistency and buffering, so the left join null-fallback path in OrderEnrichmentPipeline does fire in production.
+-----------------------
+##2A — Event-Driven Microservices
+
+Terminal 1: (consumer)
+mvn exec:java -Dexec.mainClass="com.kafka.examples.archetypes.a_eventdriven.EventDrivenConsumer"
+
+Wait until you see it print something like:
+[gdpr-cleanup-service] Subscribed to topic: customer.account.deleted
+[notification-service] Subscribed to topic: customer.account.deleted
+[inventory-service] Subscribed to topic: logistics.order.placed
+
+--all three "microservices" are live and waiting.
+
+Terminal 2: (producer)
+mvn exec:java -Dexec.mainClass="com.kafka.examples.archetypes.a_eventdriven.EventDrivenProducer"
+
+Terminal 1: shows
+--should show three "microservices" (GDPR, notifications, inventory) each reacting to the same events independently
+GDPR service logs a deletion task for each of the 3 customers
+Notification service logs an email for each of the same 3 customers — same events, different reaction
+Inventory service logs stock reservations for the 3 orders
+That's the core pub/sub pattern — one producer, multiple independent consumers each doing different things with the same event.
+
+--What it confirms
+You can see all 3 services running in parallel on separate virtual threads:
+
+[gdpr] processed all 3 account deletions
+[notifications] sent confirmation emails for all 3
+[inventory] reserved stock for all 3 orders
+
+That's the core pub/sub pattern working — one event, three independent reactions, zero coupling.
+
+Conclusion:
+3 topics auto-created by KafkaConfig.createTopicsIfAbsent() — we can see them in our --list output.
+logistics.order.placed — 3 order events landed. Notice ORD-001 and ORD-003 are on the same partition because they share the same key CUST-100 
+— that's the ordering guarantee at work.
+integration.servicenow.inbound.DLT — empty, since, No bad records were injected in 2A. The DLT topic was just pre-created.
+customer.account.deleted and customer.vehicle.mapped — also have data.
+
+---
+Topic						Events						Partitions used
+customer.account.deleted		3 events (CUST-001, CUST-002, CUST-003)			0, 1, 2
+customer.vehicle.mapped			3 events (VH-001, VH-002, VH-003)			all landed on partition 1
+logistics.order.placed			3 events (ORD-001, ORD-002, ORD-003)			1 and 2
+
+Note**
+1. Partitioning by key is working
+
+VH-001, VH-002, VH-003 all landed on partition 1 — because CUST-100 and CUST-101 hash to the same partition. 
+VH-001 and VH-003 both belong to CUST-100, so they're on the same partition — guaranteed ordering for that customer.
+
+
+Also every event follows JSON structure:
+{
+  "eventId":      "uuid",        ← unique per event
+  "eventType":    "OrderPlaced", ← what happened
+  "timestamp":    "...",         ← when
+  "sourceService":"order-service",← who published it
+  "payload":      { ... }        ← the actual domain data
+}
+
+Note**This is the DomainEvent wrapper from JsonUtil.java — in production this envelope 
+is what lets consumers route, filter, and audit events without parsing the full payload.
+
+--------------------------
+--to verify
+#Manually checking
+E:\kafka_2.13-2.8.1\bin\windows>kafka-topics.bat --bootstrap-server localhost:9092 --list
+__consumer_offsets
+customer.account.deleted
+customer.vehicle.mapped
+integration.servicenow.inbound.DLT
+logistics.order.placed
+
+kafka-console-consumer.bat --topic logistics.order.placed --bootstrap-server localhost:9092 --from-beginning
+{"eventId":"737ec578-0ace-477d-8815-a9922ecf7c23","eventType":"OrderPlaced","timestamp":"2026-06-12T03:09:00.580983800Z","sourceService":"order-service","payload":{"orderId":"ORD-001","customerId":"CUST-100","productId":"PROD-A1","quantity":2,"totalAmount":149.99,"status":"PENDING"}}
+{"eventId":"1910365c-79da-4a3f-92c1-37be6b4326ae","eventType":"OrderPlaced","timestamp":"2026-06-12T03:09:00.591961100Z","sourceService":"order-service","payload":{"orderId":"ORD-003","customerId":"CUST-100","productId":"PROD-C7","quantity":5,"totalAmount":49.95,"status":"PENDING"}}
+{"eventId":"f7caab04-d2d2-483b-a2aa-c2809bf1f3eb","eventType":"OrderPlaced","timestamp":"2026-06-12T03:09:00.590957900Z","sourceService":"order-service","payload":{"orderId":"ORD-002","customerId":"CUST-101","productId":"PROD-B3","quantity":1,"totalAmount":299.0,"status":"PENDING"}}
+
+kafka-console-consumer.bat --topic integration.servicenow.inbound.DLT --bootstrap-server localhost:9092 --from-beginning
+
+kafka-console-consumer.bat --topic customer.vehicle.mapped --bootstrap-server localhost:9092 --from-beginning
+
+kafka-console-consumer.bat --topic customer.account.deleted --bootstrap-server localhost:9092 --from-beginning
+
+OR
+--getting count
+
+E:\kafka_2.13-2.8.1\bin\windows>kafka-run-class.bat kafka.tools.GetOffsetShell --broker-list localhost:9092 --topic customer.account.deleted
+customer.account.deleted:0:1
+customer.account.deleted:1:1
+customer.account.deleted:2:1
+
+E:\kafka_2.13-2.8.1\bin\windows>kafka-run-class.bat kafka.tools.GetOffsetShell --broker-list localhost:9092 --topic logistics.order.placed
+logistics.order.placed:0:0
+logistics.order.placed:1:2
+logistics.order.placed:2:1
+
+E:\kafka_2.13-2.8.1\bin\windows>kafka-run-class.bat kafka.tools.GetOffsetShell --broker-list localhost:9092 --topic customer.vehicle.mapped
+customer.vehicle.mapped:0:0
+customer.vehicle.mapped:1:3
+customer.vehicle.mapped:2:0
+
+E:\kafka_2.13-2.8.1\bin\windows>kafka-run-class.bat kafka.tools.GetOffsetShell --broker-list localhost:9092 --topic integration.servicenow.inbound.DLT
+integration.servicenow.inbound.DLT:0:0
+integration.servicenow.inbound.DLT:1:0
+integration.servicenow.inbound.DLT:2:0
+
+E:\kafka_2.13-2.8.1\bin\windows>kafka-consumer-groups.bat --bootstrap-server localhost:9092 --describe --group gdpr-cleanup-service
+Consumer group 'gdpr-cleanup-service' has no active members.
+(it means the consumer application is not currently running. The group exists in Kafka's metadata with committed offsets, 
+but no live consumer is connected right now. 
+The CONSUMER-ID, HOST, and CLIENT-ID columns all show - for the same reason.
+This is the normal state after your Java app finishes and exits. 
+The offsets are persisted in the __consumer_offsets internal topic — that's what 
+lets a consumer restart and pick up exactly where it left off.)
+
+GROUP                TOPIC                    PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG             CONSUMER-ID     HOST            CLIENT-ID
+gdpr-cleanup-service customer.account.deleted 0          1               1               0               -               -               -
+gdpr-cleanup-service customer.account.deleted 1          1               1               0               -               -               -
+gdpr-cleanup-service customer.account.deleted 2          1               1               0               -               -               -
+
+LAG=0 on all 3 partitions. CURRENT-OFFSET equals LOG-END-OFFSET on every partition — the consumer read and committed 
+every single message. Nothing is waiting to be processed.
+
+E:\kafka_2.13-2.8.1\bin\windows>kafka-run-class.bat kafka.tools.GetOffsetShell --broker-list localhost:9092 --topic customer.account.deleted
+customer.account.deleted:0:1
+customer.account.deleted:1:1
+customer.account.deleted:2:1
+
+E:\kafka_2.13-2.8.1\bin\windows>kafka-topics.bat --bootstrap-server localhost:9092 --describe --under-replicated-partitions
+--no output
+No output = perfectly healthy.
+(Under-replicated: a partition has fewer in-sync replicas than configured. On your single-broker 
+setup this can't happen (RF=1, only one copy exists). On a multi-broker cluster this means a broker is slow or dead.)
+
+E:\kafka_2.13-2.8.1\bin\windows>kafka-topics.bat --bootstrap-server localhost:9092 --describe --unavailable-partitions
+--no output
+No output = perfectly healthy.
+(Unavailable: a partition has no leader — consumers cannot read and producers cannot write. Active outage.)
+
+E:\kafka_2.13-2.8.1\bin\windows>kafka-consumer-groups.bat --bootstrap-server localhost:9092 --describe --group notification-service
+Consumer group 'notification-service' has no active members.
+
+GROUP                TOPIC                    PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG             CONSUMER-ID     HOST            CLIENT-ID
+notification-service customer.account.deleted 0          1               1               0               -               -               -
+notification-service customer.account.deleted 1          1               1               0               -               -               -
+notification-service customer.account.deleted 2          1               1               0               -               -               -
+
+Same topic, different group, same result. Both services consumed all 3 account deletion events independently. 
+This is the pub/sub guarantee — two groups, each getting every message, each fully caught up.
+
+E:\kafka_2.13-2.8.1\bin\windows>kafka-consumer-groups.bat --bootstrap-server localhost:9092 --describe --group inventory-service
+Consumer group 'inventory-service' has no active members.
+
+GROUP             TOPIC                  PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG             CONSUMER-ID     HOST            CLIENT-ID
+inventory-service logistics.order.placed 0          0               0               0               -               -               -
+inventory-service logistics.order.placed 1          2               2               0               -               -               -
+inventory-service logistics.order.placed 2          1               1               0               -               -               -
+
+LAG=0 everywhere. Partition 0 has offset 0 on both sides — no orders ever landed there, so nothing to consume. 
+Partition 1 had 2 orders (CUST-100's orders), both consumed. Partition 2 had 1 order (CUST-101's order), consumed.
+
+Important Note**
+__consumer_offsets > is Kafka's internal topic where all consumer group offsets are stored. 
+When your Java app calls commitSync(), it writes to this topic. When your app restarts and calls subscribe(), 
+it reads from this topic to know where to resume.
+This is why LAG=0 persists even after your app stops — the committed offsets are durable, 
+stored in Kafka itself, not in your app's memory.
+============================================
+
+##2B - starts a Kafka Streams application that joins orders with customer profiles in real time. (start the enrichment pipeline)
+
+Terminal 1
+mvn exec:java -Dexec.mainClass="com.kafka.examples.archetypes.b_streaming.OrderEnrichmentPipeline"
+
+--wait till we see : Pipeline running. Producing enriched orders to: enrichment.orders.enriched
+
+C:\Users\Ajay\Downloads\kafka-examples\kafka-examples>mvn exec:java -Dexec.mainClass="com.kafka.examples.archetypes.b_streaming.OrderEnrichmentPipeline"
+[INFO] Scanning for projects...
+[INFO]
+[INFO] -----------------< com.kafka.examples:kafka-examples >------------------
+[INFO] Building Kafka Enterprise Examples 1.0.0
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO]
+[INFO] --- exec:3.2.0:java (default-cli) @ kafka-examples ---
+05:40:01.815 [com.kafka.examples.archetypes.b_streaming.OrderEnrichmentPipeline.main()] INFO  c.k.e.config.KafkaConfig - Γ£à Created topic: enrichment.orders.raw
+05:40:01.820 [com.kafka.examples.archetypes.b_streaming.OrderEnrichmentPipeline.main()] INFO  c.k.e.config.KafkaConfig - Γ£à Created topic: enrichment.customer-profiles
+05:40:01.821 [com.kafka.examples.archetypes.b_streaming.OrderEnrichmentPipeline.main()] INFO  c.k.e.config.KafkaConfig - Γ£à Created topic: enrichment.orders.enriched
+05:40:01.831 [com.kafka.examples.archetypes.b_streaming.OrderEnrichmentPipeline.main()] INFO  c.k.e.a.b.OrderEnrichmentPipeline - Seeding customer profiles KTable...
+05:40:02.201 [kafka-producer-network-thread | producer-1] INFO  c.k.e.a.b.OrderEnrichmentPipeline - Seeded profile for CUST-100
+05:40:02.202 [kafka-producer-network-thread | producer-1] INFO  c.k.e.a.b.OrderEnrichmentPipeline - Seeded profile for CUST-101
+05:40:02.203 [kafka-producer-network-thread | producer-1] INFO  c.k.e.a.b.OrderEnrichmentPipeline - Seeded profile for CUST-102
+05:40:02.203 [kafka-producer-network-thread | producer-1] INFO  c.k.e.a.b.OrderEnrichmentPipeline - Seeded profile for CUST-103
+05:40:02.212 [com.kafka.examples.archetypes.b_streaming.OrderEnrichmentPipeline.main()] INFO  c.k.e.a.b.OrderEnrichmentPipeline - Customer profiles seeded.
+05:40:04.424 [com.kafka.examples.archetypes.b_streaming.OrderEnrichmentPipeline.main()] ERROR o.a.k.s.p.i.StateDirectory - Failed to change permissions for the directory \tmp\kafka-streams-examples
+05:40:04.424 [com.kafka.examples.archetypes.b_streaming.OrderEnrichmentPipeline.main()] ERROR o.a.k.s.p.i.StateDirectory - Failed to change permissions for the directory \tmp\kafka-streams-examples\order-enrichment-pipeline
+05:40:04.575 [com.kafka.examples.archetypes.b_streaming.OrderEnrichmentPipeline.main()] INFO  c.k.e.a.b.OrderEnrichmentPipeline - Γ£à Kafka Streams started with application.id=order-enrichment-pipeline
+05:40:04.584 [order-enrichment-pipeline-867ffd63-a48e-4a36-bd19-c002e882a275-StreamThread-1] WARN  o.a.k.clients.NetworkClient - [Consumer clientId=order-enrichment-pipeline-867ffd63-a48e-4a36-bd19-c002e882a275-StreamThread-1-consumer, groupId=order-enrichment-pipeline] Error while fetching metadata with correlation id 2 : {order-enrichment-pipeline-KSTREAM-KEY-SELECT-0000000003-repartition=UNKNOWN_TOPIC_OR_PARTITION}
+05:40:04.705 [order-enrichment-pipeline-867ffd63-a48e-4a36-bd19-c002e882a275-StreamThread-1] WARN  o.a.k.clients.NetworkClient - [Consumer clientId=order-enrichment-pipeline-867ffd63-a48e-4a36-bd19-c002e882a275-StreamThread-1-consumer, groupId=order-enrichment-pipeline] Error while fetching metadata with correlation id 8 : {order-enrichment-pipeline-KSTREAM-KEY-SELECT-0000000003-repartition=UNKNOWN_TOPIC_OR_PARTITION}
+05:40:07.575 [com.kafka.examples.archetypes.b_streaming.OrderEnrichmentPipeline.main()] INFO  c.k.e.a.b.OrderEnrichmentPipeline - Publishing raw orders...
+05:40:07.616 [com.kafka.examples.archetypes.b_streaming.OrderEnrichmentPipeline.main()] INFO  c.k.e.a.b.OrderEnrichmentPipeline - Raw orders published.
+05:40:07.616 [com.kafka.examples.archetypes.b_streaming.OrderEnrichmentPipeline.main()] INFO  c.k.e.a.b.OrderEnrichmentPipeline - Γ£à Pipeline running. Producing enriched orders to: enrichment.orders.enriched
+05:40:07.619 [com.kafka.examples.archetypes.b_streaming.OrderEnrichmentPipeline.main()] INFO  c.k.e.a.b.OrderEnrichmentPipeline -    Run EnrichmentVerifier in another terminal to consume enriched output.
+05:40:07.678 [order-enrichment-pipeline-867ffd63-a48e-4a36-bd19-c002e882a275-StreamThread-1] INFO  c.k.e.a.b.OrderEnrichmentPipeline - ≡ƒô¿ Raw order received: orderId=ORD-001 customerId=CUST-100
+05:40:07.682 [order-enrichment-pipeline-867ffd63-a48e-4a36-bd19-c002e882a275-StreamThread-1] INFO  c.k.e.a.b.OrderEnrichmentPipeline - ≡ƒô¿ Raw order received: orderId=ORD-002 customerId=CUST-101
+05:40:07.695 [order-enrichment-pipeline-867ffd63-a48e-4a36-bd19-c002e882a275-StreamThread-1] INFO  c.k.e.a.b.OrderEnrichmentPipeline - ≡ƒô¿ Raw order received: orderId=ORD-004 customerId=CUST-102
+05:40:07.696 [order-enrichment-pipeline-867ffd63-a48e-4a36-bd19-c002e882a275-StreamThread-1] INFO  c.k.e.a.b.OrderEnrichmentPipeline - ≡ƒô¿ Raw order received: orderId=ORD-003 customerId=CUST-999
+05:40:07.718 [order-enrichment-pipeline-867ffd63-a48e-4a36-bd19-c002e882a275-StreamThread-1] INFO  c.k.e.a.b.OrderEnrichmentPipeline - Γ£à Enriched: customerId=CUST-100 tier=GOLD region=EU-WEST
+05:40:07.720 [order-enrichment-pipeline-867ffd63-a48e-4a36-bd19-c002e882a275-StreamThread-1] INFO  c.k.e.a.b.OrderEnrichmentPipeline - ≡ƒôñ Forwarding enriched order for customerId=CUST-100
+05:40:07.724 [order-enrichment-pipeline-867ffd63-a48e-4a36-bd19-c002e882a275-StreamThread-1] INFO  c.k.e.a.b.OrderEnrichmentPipeline - Γ£à Enriched: customerId=CUST-101 tier=SILVER region=EU-CENTRAL
+05:40:07.726 [order-enrichment-pipeline-867ffd63-a48e-4a36-bd19-c002e882a275-StreamThread-1] INFO  c.k.e.a.b.OrderEnrichmentPipeline - ≡ƒôñ Forwarding enriched order for customerId=CUST-101
+05:40:07.818 [order-enrichment-pipeline-867ffd63-a48e-4a36-bd19-c002e882a275-StreamThread-1] INFO  c.k.e.a.b.OrderEnrichmentPipeline - Γ£à Enriched: customerId=CUST-102 tier=GOLD region=EU-NORTH
+05:40:07.819 [order-enrichment-pipeline-867ffd63-a48e-4a36-bd19-c002e882a275-StreamThread-1] INFO  c.k.e.a.b.OrderEnrichmentPipeline - ≡ƒôñ Forwarding enriched order for customerId=CUST-102
+05:40:49.873 [Thread-2] INFO  c.k.e.a.b.OrderEnrichmentPipeline - Stopping streams...
+Terminate batch job (Y/N)?
+
+Terminal 2 (start the verifier)
+mvn exec:java -Dexec.mainClass="com.kafka.examples.archetypes.b_streaming.EnrichmentVerifier"
+
+C:\Users\Ajay\Downloads\kafka-examples\kafka-examples>mvn exec:java -Dexec.mainClass="com.kafka.examples.archetypes.b_streaming.EnrichmentVerifier"
+[INFO] Scanning for projects...
+[INFO]
+[INFO] -----------------< com.kafka.examples:kafka-examples >------------------
+[INFO] Building Kafka Enterprise Examples 1.0.0
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO]
+[INFO] --- exec:3.2.0:java (default-cli) @ kafka-examples ---
+05:40:32.873 [com.kafka.examples.archetypes.b_streaming.EnrichmentVerifier.main()] INFO  c.k.e.a.b.EnrichmentVerifier - Listening for enriched orders on: enrichment.orders.enriched
+05:40:33.283 [com.kafka.examples.archetypes.b_streaming.EnrichmentVerifier.main()] INFO  c.k.e.a.b.EnrichmentVerifier - ≡ƒôÑ ENRICHED ORDER #1 ΓåÆ key=CUST-100
+   value={"originalOrder":{"eventId":"cdfe3ac3-c99c-4df1-bf27-03b554b4d7a5","eventType":"OrderPlaced","timestamp":"2026-06-12T03:40:07.587863500Z","sourceService":"order-service","payload":{"orderId":"ORD-001","customerId":"CUST-100","productId":"PROD-A1","quantity":2,"totalAmount":149.99,"status":"PENDING"}},"customer":{"customerId":"CUST-100","name":"Alice Schmidt","email":"alice@example.com","tier":"GOLD","preferredRegion":"EU-WEST"},"enrichedAt":"2026-06-12T03:40:07.718604Z"}
+
+05:40:33.290 [com.kafka.examples.archetypes.b_streaming.EnrichmentVerifier.main()] INFO  c.k.e.a.b.EnrichmentVerifier - ≡ƒôÑ ENRICHED ORDER #2 ΓåÆ key=CUST-101
+   value={"originalOrder":{"eventId":"2edbae3f-75d2-435e-806d-7693a2321d79","eventType":"OrderPlaced","timestamp":"2026-06-12T03:40:07.603019200Z","sourceService":"order-service","payload":{"orderId":"ORD-002","customerId":"CUST-101","productId":"PROD-B3","quantity":1,"totalAmount":299.0,"status":"PENDING"}},"customer":{"customerId":"CUST-101","name":"Bob Meier","email":"bob@example.com","tier":"SILVER","preferredRegion":"EU-CENTRAL"},"enrichedAt":"2026-06-12T03:40:07.724591900Z"}
+
+05:40:33.293 [com.kafka.examples.archetypes.b_streaming.EnrichmentVerifier.main()] INFO  c.k.e.a.b.EnrichmentVerifier - ≡ƒôÑ ENRICHED ORDER #3 ΓåÆ key=CUST-102
+   value={"originalOrder":{"eventId":"81e58ab1-b227-4902-a9a3-7ee41cefae4a","eventType":"OrderPlaced","timestamp":"2026-06-12T03:40:07.603019200Z","sourceService":"order-service","payload":{"orderId":"ORD-004","customerId":"CUST-102","productId":"PROD-D2","quantity":1,"totalAmount":599.0,"status":"PENDING"}},"customer":{"customerId":"CUST-102","name":"Carol Bauer","email":"carol@example.com","tier":"GOLD","preferredRegion":"EU-NORTH"},"enrichedAt":"2026-06-12T03:40:07.818831600Z"}
+
+05:40:36.296 [com.kafka.examples.archetypes.b_streaming.EnrichmentVerifier.main()] INFO  c.k.e.a.b.EnrichmentVerifier - Still waiting... (is OrderEnrichmentPipeline running?)
+05:40:39.307 [com.kafka.examples.archetypes.b_streaming.EnrichmentVerifier.main()] INFO  c.k.e.a.b.EnrichmentVerifier - Still waiting... (is OrderEnrichmentPipeline running?)
+05:40:42.320 [com.kafka.examples.archetypes.b_streaming.EnrichmentVerifier.main()] INFO  c.k.e.a.b.EnrichmentVerifier - Still waiting... (is OrderEnrichmentPipeline running?)
+Terminate batch job (Y/N)?
+
+--What is happening here:
+4 raw orders in and then 3 enriched orders out. 
+That missing one is the key insight:
+Order			Customer			Result			Why
+ORD-001			CUST-100			Enriched	Alice Schmidt, GOLD, EU-WEST
+ORD-002			CUST-101 			Enriched	Bob Meier, SILVER, EU-CENTRAL
+ORD-004			CUST-102 			Enriched	Carol Bauer, GOLD, EU-NORTH
+ORD-003			CUST-999 			No output	Unknown customer — KTable has no record for this key
+
+This is exactly the KStream-KTable left join behaviour we saw in the test — in TopologyTestDriver and in a real cluster, 
+if the key doesn't exist in the KTable the record is dropped. 
+The null-check fallback in the code only fires if the KTable has been populated but the specific key is missing after a rekey. 
+CUST-999 was never seeded so it silently drops.
+
+Two other things worth noting:
+The UNKNOWN_TOPIC_OR_PARTITION warning — harmless. Kafka Streams automatically creates an internal repartition topic when 
+selectKey() is called (to shuffle records to the right partition for the join). 
+The warning appears briefly while Kafka creates that topic. It disappears after a second.
+
+--The enriched JSON is the real payoff — look at enriched order #1:
+{
+  "originalOrder": { "orderId": "ORD-001", "customerId": "CUST-100", ... },
+  "customer":      { "name": "Alice Schmidt", "tier": "GOLD", "preferredRegion": "EU-WEST" },
+  "enrichedAt":    "2026-06-12T03:40:07.718Z"
+}
+
+--A downstream DB writer or data lake connector consuming enrichment.orders.enriched gets the full context in one message — no second lookup needed.
+
+--To verify
+#Manually checking
+After running:
+E:\kafka_2.13-2.8.1\bin\windows>kafka-topics.bat --bootstrap-server localhost:9092 --list
+__consumer_offsets
+customer.account.deleted
+customer.vehicle.mapped
+enrichment.customer-profiles
+enrichment.orders.enriched
+enrichment.orders.raw
+integration.servicenow.inbound.DLT
+logistics.order.placed
+order-enrichment-pipeline-KSTREAM-KEY-SELECT-0000000003-repartition
+order-enrichment-pipeline-customer-profiles-store-changelog
+
+E:\kafka_2.13-2.8.1\bin\windows>kafka-topics.bat --bootstrap-server localhost:9092 --describe --topic order-enrichment-pipeline-KSTREAM-KEY-SELECT-0000000003-repartition
+Topic: order-enrichment-pipeline-KSTREAM-KEY-SELECT-0000000003-repartition      TopicId: YnA0OKsATH-bwqw42f1qmw PartitionCount: 3       ReplicationFactor: 1        Configs: cleanup.policy=delete,segment.bytes=52428800,retention.ms=-1,message.timestamp.type=CreateTime
+        Topic: order-enrichment-pipeline-KSTREAM-KEY-SELECT-0000000003-repartition      Partition: 0    Leader: 0       Replicas: 0     Isr: 0
+        Topic: order-enrichment-pipeline-KSTREAM-KEY-SELECT-0000000003-repartition      Partition: 1    Leader: 0       Replicas: 0     Isr: 0
+        Topic: order-enrichment-pipeline-KSTREAM-KEY-SELECT-0000000003-repartition      Partition: 2    Leader: 0       Replicas: 0     Isr: 0
+
+
+E:\kafka_2.13-2.8.1\bin\windows>kafka-topics.bat --bootstrap-server localhost:9092 --describe --topic order-enrichment-pipeline-customer-profiles-store-changelog
+Topic: order-enrichment-pipeline-customer-profiles-store-changelog      TopicId: 5gM8z_lPS6KVX0-0_CHwjw PartitionCount: 3       ReplicationFactor: 1        Configs: cleanup.policy=compact,segment.bytes=1073741824,message.timestamp.type=CreateTime
+        Topic: order-enrichment-pipeline-customer-profiles-store-changelog      Partition: 0    Leader: 0       Replicas: 0     Isr: 0
+        Topic: order-enrichment-pipeline-customer-profiles-store-changelog      Partition: 1    Leader: 0       Replicas: 0     Isr: 0
+        Topic: order-enrichment-pipeline-customer-profiles-store-changelog      Partition: 2    Leader: 0       Replicas: 0     Isr: 0
+
+E:\kafka_2.13-2.8.1\bin\windows>kafka-run-class.bat kafka.tools.GetOffsetShell --broker-list localhost:9092 --topic enrichment.customer-profiles
+enrichment.customer-profiles:0:0
+enrichment.customer-profiles:1:4
+enrichment.customer-profiles:2:0
+
+E:\kafka_2.13-2.8.1\bin\windows>kafka-run-class.bat kafka.tools.GetOffsetShell --broker-list localhost:9092 --topic enrichment.orders.raw
+enrichment.orders.raw:0:1
+enrichment.orders.raw:1:2
+enrichment.orders.raw:2:1
+
+E:\kafka_2.13-2.8.1\bin\windows>kafka-run-class.bat kafka.tools.GetOffsetShell --broker-list localhost:9092 --topic order-enrichment-pipeline-KSTREAM-KEY-SELECT-0000000003-repartition
+order-enrichment-pipeline-KSTREAM-KEY-SELECT-0000000003-repartition:0:1
+order-enrichment-pipeline-KSTREAM-KEY-SELECT-0000000003-repartition:1:3
+order-enrichment-pipeline-KSTREAM-KEY-SELECT-0000000003-repartition:2:0
+
+E:\kafka_2.13-2.8.1\bin\windows>kafka-run-class.bat kafka.tools.GetOffsetShell --broker-list localhost:9092 --topic enrichment.orders.enriched
+enrichment.orders.enriched:0:0
+enrichment.orders.enriched:1:3
+enrichment.orders.enriched:2:0
+
+E:\kafka_2.13-2.8.1\bin\windows>kafka-run-class.bat kafka.tools.GetOffsetShell --broker-list localhost:9092 --topic order-enrichment-pipeline-customer-profiles-store-changelo
+Topic order-enrichment-pipeline-customer-profiles-store-changelo does not exist
+
+E:\kafka_2.13-2.8.1\bin\windows>kafka-run-class.bat kafka.tools.GetOffsetShell --broker-list localhost:9092 --topic order-enrichment-pipeline-customer-profiles-store-changelog
+order-enrichment-pipeline-customer-profiles-store-changelog:0:0
+order-enrichment-pipeline-customer-profiles-store-changelog:1:4
+order-enrichment-pipeline-customer-profiles-store-changelog:2:0
+
+E:\kafka_2.13-2.8.1\bin\windows>kafka-consumer-groups.bat --bootstrap-server localhost:9092 --list
+enrichment-verifier-group
+inventory-service
+gdpr-cleanup-service
+order-enrichment-pipeline
+notification-service
+
+E:\kafka_2.13-2.8.1\bin\windows>kafka-consumer-groups.bat --bootstrap-server localhost:9092 --describe --group order-enrichment-pipeline
+
+Consumer group 'order-enrichment-pipeline' has no active members.
+
+GROUP                     TOPIC                                                               PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG             CONSUMER-ID     HOST            CLIENT-ID
+order-enrichment-pipeline order-enrichment-pipeline-KSTREAM-KEY-SELECT-0000000003-repartition 0          1               1               0               -               -               -
+order-enrichment-pipeline enrichment.orders.raw                                               0          1               1               0               -               -               -
+order-enrichment-pipeline order-enrichment-pipeline-KSTREAM-KEY-SELECT-0000000003-repartition 1          3               3               0               -               -               -
+order-enrichment-pipeline enrichment.orders.raw                                               1          2               2               0               -               -               -
+order-enrichment-pipeline enrichment.orders.raw                                               2          1               1               0               -               -               -
+order-enrichment-pipeline enrichment.customer-profiles                                        1          4               4               0               -               -               -
+
+E:\kafka_2.13-2.8.1\bin\windows>kafka-consumer-groups.bat --bootstrap-server localhost:9092 --describe --group enrichment-verifier-group
+
+Consumer group 'enrichment-verifier-group' has no active members.
+
+GROUP                     TOPIC                      PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG             CONSUMER-ID     HOST            CLIENT-ID
+enrichment-verifier-group enrichment.orders.enriched 2          0               0               0               -               -               -
+enrichment-verifier-group enrichment.orders.enriched 0          0               0               0               -               -               -
+enrichment-verifier-group enrichment.orders.enriched 1          3               3               0               -               -               -
+               
+===============================================================================
+##2C
+mvn exec:java -Dexec.mainClass="com.kafka.examples.archetypes.c_ingestion.IngestionPipeline"
+C:\Users\Ajay\Downloads\kafka-examples\kafka-examples>mvn exec:java -Dexec.mainClass="com.kafka.examples.archetypes.c_ingestion.IngestionPipeline"
+[INFO] Scanning for projects...
+[INFO]
+[INFO] -----------------< com.kafka.examples:kafka-examples >------------------
+[INFO] Building Kafka Enterprise Examples 1.0.0
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO]
+[INFO] --- exec:3.2.0:java (default-cli) @ kafka-examples ---
+05:43:36.408 [com.kafka.examples.archetypes.c_ingestion.IngestionPipeline.main()] INFO  c.k.e.config.KafkaConfig - Γ£à Created topic: integration.servicenow.inbound
+05:43:36.425 [virtual-37] INFO  c.k.e.a.c.IngestionPipeline - ≡ƒîÉ Simulating REST Proxy ingestion (ServiceNow ΓåÆ Kafka)...
+05:43:36.505 [virtual-37] INFO  c.k.e.a.c.IngestionPipeline - ≡ƒôª Sending batch 1 of 3
+05:43:36.746 [virtual-37] WARN  c.k.e.a.c.IngestionPipeline - ΓÜí Injected malformed record: INC-000006
+05:43:36.767 [virtual-37] INFO  c.k.e.a.c.IngestionPipeline - ≡ƒôñ Batch 1 flushed (10 records total)
+05:43:37.287 [virtual-37] INFO  c.k.e.a.c.IngestionPipeline - ≡ƒôª Sending batch 2 of 3
+05:43:37.294 [virtual-37] WARN  c.k.e.a.c.IngestionPipeline - ΓÜí Injected malformed record: INC-000018
+05:43:37.302 [virtual-37] INFO  c.k.e.a.c.IngestionPipeline - ≡ƒôñ Batch 2 flushed (20 records total)
+05:43:37.441 [virtual-49] INFO  c.k.e.a.c.IngestionPipeline - ΓÜÖ∩╕Å  Starting ingestion processor...
+05:43:37.632 [virtual-49] INFO  c.k.e.a.c.IngestionPipeline - ≡ƒöì [PROBLEM]  INC-000001 | sev=P1 | team=Network-Team
+05:43:37.633 [virtual-49] INFO  c.k.e.a.c.IngestionPipeline - ≡ƒöì [PROBLEM]  INC-000003 | sev=P2 | team=Network-Team
+05:43:37.635 [virtual-49] INFO  c.k.e.a.c.IngestionPipeline - ≡ƒÜ¿ [INCIDENT] INC-000005 | sev=P1 | team=Security-Team
+05:43:37.635 [virtual-49] INFO  c.k.e.a.c.IngestionPipeline - ≡ƒöì [PROBLEM]  INC-000011 | sev=P1 | team=Application-Team
+05:43:37.642 [virtual-49] INFO  c.k.e.a.c.IngestionPipeline - ≡ƒÜ¿ [INCIDENT] INC-000015 | sev=P2 | team=Database-Team
+05:43:37.643 [virtual-49] ERROR c.k.e.a.c.IngestionPipeline - Γ¥î Validation failed for INC-000018: Missing required field: category
+05:43:37.649 [virtual-49] INFO  c.k.e.a.c.IngestionPipeline - ≡ƒöì [PROBLEM]  INC-000020 | sev=P2 | team=Security-Team
+05:43:37.650 [virtual-49] INFO  c.k.e.a.c.IngestionPipeline - ≡ƒöì [PROBLEM]  INC-000002 | sev=P1 | team=Security-Team
+05:43:37.651 [virtual-49] ERROR c.k.e.a.c.IngestionPipeline - Γ¥î Validation failed for INC-000006: Missing required field: category
+05:43:37.656 [kafka-producer-network-thread | producer-2] WARN  c.k.e.a.c.IngestionPipeline - ≡ƒÆÇ DLT ΓåÉ key=INC-000018 reason=Missing required field: category
+05:43:37.658 [virtual-49] INFO  c.k.e.a.c.IngestionPipeline - ≡ƒöä [CHANGE]   INC-000009 | sev=P4 | team=Network-Team
+05:43:37.659 [virtual-49] INFO  c.k.e.a.c.IngestionPipeline - ≡ƒöì [PROBLEM]  INC-000012 | sev=P2 | team=Network-Team
+05:43:37.660 [virtual-49] INFO  c.k.e.a.c.IngestionPipeline - ≡ƒöì [PROBLEM]  INC-000016 | sev=P1 | team=Database-Team
+05:43:37.661 [virtual-49] INFO  c.k.e.a.c.IngestionPipeline - ≡ƒÜ¿ [INCIDENT] INC-000017 | sev=P3 | team=Application-Team
+05:43:37.663 [kafka-producer-network-thread | producer-2] WARN  c.k.e.a.c.IngestionPipeline - ≡ƒÆÇ DLT ΓåÉ key=INC-000006 reason=Missing required field: category
+05:43:37.666 [virtual-49] INFO  c.k.e.a.c.IngestionPipeline - ≡ƒöä [CHANGE]   INC-000019 | sev=P1 | team=Platform-Team
+05:43:37.673 [virtual-49] INFO  c.k.e.a.c.IngestionPipeline - ≡ƒöì [PROBLEM]  INC-000004 | sev=P4 | team=Platform-Team
+05:43:37.674 [virtual-49] INFO  c.k.e.a.c.IngestionPipeline - ≡ƒöì [PROBLEM]  INC-000007 | sev=P1 | team=Database-Team
+05:43:37.675 [virtual-49] INFO  c.k.e.a.c.IngestionPipeline - ≡ƒöì [PROBLEM]  INC-000008 | sev=P1 | team=Security-Team
+05:43:37.676 [virtual-49] INFO  c.k.e.a.c.IngestionPipeline - ≡ƒöì [PROBLEM]  INC-000010 | sev=P2 | team=Security-Team
+05:43:37.678 [virtual-49] INFO  c.k.e.a.c.IngestionPipeline - ≡ƒöì [PROBLEM]  INC-000013 | sev=P1 | team=Application-Team
+05:43:37.681 [virtual-49] INFO  c.k.e.a.c.IngestionPipeline - ≡ƒÜ¿ [INCIDENT] INC-000014 | sev=P1 | team=Security-Team
+05:43:37.816 [virtual-37] INFO  c.k.e.a.c.IngestionPipeline - ≡ƒôª Sending batch 3 of 3
+05:43:37.853 [virtual-49] INFO  c.k.e.a.c.IngestionPipeline - ≡ƒÜ¿ [INCIDENT] INC-000023 | sev=P2 | team=Platform-Team
+05:43:37.853 [virtual-37] INFO  c.k.e.a.c.IngestionPipeline - ≡ƒôñ Batch 3 flushed (30 records total)
+05:43:37.854 [virtual-49] INFO  c.k.e.a.c.IngestionPipeline - ≡ƒÜ¿ [INCIDENT] INC-000021 | sev=P3 | team=Security-Team
+05:43:37.870 [virtual-49] INFO  c.k.e.a.c.IngestionPipeline - ≡ƒÜ¿ [INCIDENT] INC-000022 | sev=P4 | team=Security-Team
+05:43:37.891 [virtual-49] INFO  c.k.e.a.c.IngestionPipeline - ≡ƒÜ¿ [INCIDENT] INC-000024 | sev=P4 | team=Network-Team
+05:43:37.893 [virtual-49] INFO  c.k.e.a.c.IngestionPipeline - ≡ƒöä [CHANGE]   INC-000026 | sev=P1 | team=Database-Team
+05:43:37.899 [virtual-49] INFO  c.k.e.a.c.IngestionPipeline - ≡ƒÜ¿ [INCIDENT] INC-000027 | sev=P2 | team=Platform-Team
+05:43:37.900 [virtual-49] INFO  c.k.e.a.c.IngestionPipeline - ≡ƒöä [CHANGE]   INC-000030 | sev=P4 | team=Application-Team
+05:43:37.906 [virtual-49] INFO  c.k.e.a.c.IngestionPipeline - ≡ƒÜ¿ [INCIDENT] INC-000025 | sev=P1 | team=Security-Team
+05:43:37.909 [virtual-49] INFO  c.k.e.a.c.IngestionPipeline - ≡ƒÜ¿ [INCIDENT] INC-000028 | sev=P1 | team=Application-Team
+05:43:37.913 [virtual-49] INFO  c.k.e.a.c.IngestionPipeline - ≡ƒöä [CHANGE]   INC-000029 | sev=P3 | team=Platform-Team
+05:43:37.919 [virtual-49] INFO  c.k.e.a.c.IngestionPipeline - === Ingestion Processing Summary ===
+05:43:37.920 [virtual-49] INFO  c.k.e.a.c.IngestionPipeline -   INCIDENT: 11 records
+05:43:37.921 [virtual-49] INFO  c.k.e.a.c.IngestionPipeline -   PROBLEM: 12 records
+05:43:37.922 [virtual-49] INFO  c.k.e.a.c.IngestionPipeline -   CHANGE: 5 records
+05:43:37.923 [virtual-49] INFO  c.k.e.a.c.IngestionPipeline -   DLT: 2 records
+05:43:38.362 [virtual-37] INFO  c.k.e.a.c.IngestionPipeline - Γ£à Ingestion complete. 30 records sent.
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  3.506 s
+[INFO] Finished at: 2026-06-12T05:43:38+02:00
+[INFO] ------------------------------------------------------------------------
+
+Conclusion:
+summary — 30 records in, accounted for exactly:
+Category		Count		What happened
+INCIDENT		11		Routed to incident handler
+PROBLEM			12		Routed to problem handler
+CHANGE			5		Routed to change handler
+DLT			2		INC-000006 and INC-000018 — missing category field
+Total			30 		Every record accounted for
+
+Three key things working here:
+1. Schema validation at the ingestion boundary — INC-000006 and INC-000018 were deliberately injected with "category":null. 
+The validator caught them immediately with Missing required field: category and refused to route them.
+
+2. Dead-Letter Topic — instead of silently dropping them, both bad records were sent to integration.servicenow.inbound.
+DLT with the failure reason attached. In production an ops team would monitor this topic and fix + replay those records.
+
+3. Producer and consumer ran concurrently — notice the interleaving in the logs. Batch 1 and 2 were being produced 
+while the consumer was already processing. Batch 3 arrived while the consumer was mid-way through batch 2. 
+This is real async behaviour — the two virtual threads ran independently.
+
+E:\kafka_2.13-2.8.1\bin\windows>kafka-run-class.bat kafka.tools.GetOffsetShell --broker-list localhost:9092 --topic integration.servicenow.inbound
+integration.servicenow.inbound:0:8
+integration.servicenow.inbound:1:12
+integration.servicenow.inbound:2:10
+
+E:\kafka_2.13-2.8.1\bin\windows>kafka-run-class.bat kafka.tools.GetOffsetShell --broker-list localhost:9092 --topic integration.servicenow.inbound.DLT
+integration.servicenow.inbound.DLT:0:1
+integration.servicenow.inbound.DLT:1:1
+integration.servicenow.inbound.DLT:2:0
+
+E:\kafka_2.13-2.8.1\bin\windows>kafka-consumer-groups.bat --bootstrap-server localhost:9092 --describe --group servicenow-ingestion-processor
+
+Consumer group 'servicenow-ingestion-processor' has no active members.
+
+GROUP                          TOPIC                          PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG             CONSUMER-ID     HOST            CLIENT-ID
+servicenow-ingestion-processor integration.servicenow.inbound 1          12              12              0               -               -               -
+servicenow-ingestion-processor integration.servicenow.inbound 0          8               8               0               -               -               -
+servicenow-ingestion-processor integration.servicenow.inbound 2          10              10              0               -               -               -
+
+E:\kafka_2.13-2.8.1\bin\windows>kafka-topics.bat --bootstrap-server localhost:9092 --describe --topic integration.servicenow.inbound
+Topic: integration.servicenow.inbound   TopicId: TXZ38aqPQTqLcW68VtlyPQ PartitionCount: 3       ReplicationFactor: 1    Configs: segment.bytes=1073741824
+        Topic: integration.servicenow.inbound   Partition: 0    Leader: 0       Replicas: 0     Isr: 0
+        Topic: integration.servicenow.inbound   Partition: 1    Leader: 0       Replicas: 0     Isr: 0
+        Topic: integration.servicenow.inbound   Partition: 2    Leader: 0       Replicas: 0     Isr: 0
+
+E:\kafka_2.13-2.8.1\bin\windows>kafka-topics.bat --bootstrap-server localhost:9092 --describe --topic integration.servicenow.inbound.DLT
+Topic: integration.servicenow.inbound.DLT       TopicId: DniuPKs2TuCsbK7322vBBw PartitionCount: 3       ReplicationFactor: 1    Configs: segment.bytes=1073741824
+        Topic: integration.servicenow.inbound.DLT       Partition: 0    Leader: 0       Replicas: 0     Isr: 0
+        Topic: integration.servicenow.inbound.DLT       Partition: 1    Leader: 0       Replicas: 0     Isr: 0
+        Topic: integration.servicenow.inbound.DLT       Partition: 2    Leader: 0       Replicas: 0     Isr: 0
+        
+=======================================================
+##2D
+mvn exec:java -Dexec.mainClass="com.kafka.examples.archetypes.d_sharing.AsyncDataSharing"
+C:\Users\Ajay\Downloads\kafka-examples\kafka-examples>mvn exec:java -Dexec.mainClass="com.kafka.examples.archetypes.d_sharing.AsyncDataSharing"
+[INFO] Scanning for projects...
+[INFO]
+[INFO] -----------------< com.kafka.examples:kafka-examples >------------------
+[INFO] Building Kafka Enterprise Examples 1.0.0
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO]
+[INFO] --- exec:3.2.0:java (default-cli) @ kafka-examples ---
+05:44:54.028 [com.kafka.examples.archetypes.d_sharing.AsyncDataSharing.main()] INFO  c.k.e.config.KafkaConfig - Γ£à Created topic: logistics.warehouse.inventory-changed
+05:44:54.032 [com.kafka.examples.archetypes.d_sharing.AsyncDataSharing.main()] INFO  c.k.e.config.KafkaConfig - Γ£à Created topic: logistics.shipment.status-changed
+05:44:54.206 [virtual-40] INFO  c.k.e.a.d.AsyncDataSharing - [notification-service] subscribed to shipment events
+05:44:54.206 [virtual-39] INFO  c.k.e.a.d.AsyncDataSharing - [reporting-service] subscribed to warehouse events
+05:44:54.206 [virtual-37] INFO  c.k.e.a.d.AsyncDataSharing - [fulfillment-service] subscribed to warehouse events
+05:44:54.206 [virtual-42] INFO  c.k.e.a.d.AsyncDataSharing - [customer-portal-service] subscribed to shipment events
+05:44:55.060 [virtual-57] INFO  c.k.e.a.d.AsyncDataSharing - ≡ƒÅ¡ Warehouse system: publishing inventory events...
+05:44:55.060 [virtual-58] INFO  c.k.e.a.d.AsyncDataSharing - ≡ƒÜÜ Logistics system: publishing shipment events...
+05:44:55.369 [kafka-producer-network-thread | producer-2] INFO  c.k.e.a.d.AsyncDataSharing - ≡ƒÅ¡ ΓåÆ warehouse event: STOCK_OUT PROD-C7 qty=37 newStock=78
+05:44:55.369 [kafka-producer-network-thread | producer-1] INFO  c.k.e.a.d.AsyncDataSharing - ≡ƒÜÜ ΓåÆ shipment event: SHP-001 status=PICKED location=Munich Warehouse
+05:44:55.398 [virtual-42] INFO  c.k.e.a.d.AsyncDataSharing - [customer-portal] ≡ƒûÑ∩╕Å  Updating tracking page: SHP-001 ΓåÆ PICKED @ Munich Warehouse
+05:44:55.405 [virtual-37] INFO  c.k.e.a.d.AsyncDataSharing - [fulfillment] ≡ƒôª STOCK_OUT ΓåÆ product=PROD-C7 newStock=78 ΓÇö checking fulfillable orders
+05:44:55.405 [virtual-39] INFO  c.k.e.a.d.AsyncDataSharing - [reporting]   ≡ƒôè STOCK_OUT ΓåÆ product=PROD-C7 qty=37 ΓÇö updating inventory report
+05:44:55.663 [kafka-producer-network-thread | producer-2] INFO  c.k.e.a.d.AsyncDataSharing - ≡ƒÅ¡ ΓåÆ warehouse event: ADJUSTMENT PROD-D2 qty=35 newStock=83
+05:44:55.667 [virtual-37] INFO  c.k.e.a.d.AsyncDataSharing - [fulfillment] ≡ƒôª ADJUSTMENT ΓåÆ product=PROD-D2 newStock=83 ΓÇö checking fulfillable orders
+05:44:55.667 [virtual-39] INFO  c.k.e.a.d.AsyncDataSharing - [reporting]   ≡ƒôè ADJUSTMENT ΓåÆ product=PROD-D2 qty=35 ΓÇö updating inventory report
+05:44:55.770 [kafka-producer-network-thread | producer-1] INFO  c.k.e.a.d.AsyncDataSharing - ≡ƒÜÜ ΓåÆ shipment event: SHP-001 status=PACKED location=Munich Warehouse
+05:44:55.774 [virtual-42] INFO  c.k.e.a.d.AsyncDataSharing - [customer-portal] ≡ƒûÑ∩╕Å  Updating tracking page: SHP-001 ΓåÆ PACKED @ Munich Warehouse
+05:44:55.971 [kafka-producer-network-thread | producer-2] INFO  c.k.e.a.d.AsyncDataSharing - ≡ƒÅ¡ ΓåÆ warehouse event: STOCK_IN PROD-D2 qty=45 newStock=15
+05:44:55.973 [virtual-37] INFO  c.k.e.a.d.AsyncDataSharing - [fulfillment] ≡ƒôª STOCK_IN ΓåÆ product=PROD-D2 newStock=15 ΓÇö checking fulfillable orders
+05:44:55.973 [virtual-39] INFO  c.k.e.a.d.AsyncDataSharing - [reporting]   ≡ƒôè STOCK_IN ΓåÆ product=PROD-D2 qty=45 ΓÇö updating inventory report
+05:44:56.176 [kafka-producer-network-thread | producer-1] INFO  c.k.e.a.d.AsyncDataSharing - ≡ƒÜÜ ΓåÆ shipment event: SHP-002 status=PICKED location=Berlin Warehouse
+05:44:56.177 [virtual-42] INFO  c.k.e.a.d.AsyncDataSharing - [customer-portal] ≡ƒûÑ∩╕Å  Updating tracking page: SHP-002 ΓåÆ PICKED @ Berlin Warehouse
+05:44:56.291 [kafka-producer-network-thread | producer-2] INFO  c.k.e.a.d.AsyncDataSharing - ≡ƒÅ¡ ΓåÆ warehouse event: ADJUSTMENT PROD-D2 qty=18 newStock=83
+05:44:56.293 [virtual-37] INFO  c.k.e.a.d.AsyncDataSharing - [fulfillment] ≡ƒôª ADJUSTMENT ΓåÆ product=PROD-D2 newStock=83 ΓÇö checking fulfillable orders
+05:44:56.293 [virtual-39] INFO  c.k.e.a.d.AsyncDataSharing - [reporting]   ≡ƒôè ADJUSTMENT ΓåÆ product=PROD-D2 qty=18 ΓÇö updating inventory report
+05:44:56.584 [kafka-producer-network-thread | producer-1] INFO  c.k.e.a.d.AsyncDataSharing - ≡ƒÜÜ ΓåÆ shipment event: SHP-001 status=SHIPPED location=Munich Hub
+05:44:56.586 [virtual-40] INFO  c.k.e.a.d.AsyncDataSharing - [notifications] ≡ƒôº Sending 'SHIPPED' email for shipment=SHP-001 order=ORD-001
+05:44:56.586 [virtual-42] INFO  c.k.e.a.d.AsyncDataSharing - [customer-portal] ≡ƒûÑ∩╕Å  Updating tracking page: SHP-001 ΓåÆ SHIPPED @ Munich Hub
+05:44:56.599 [kafka-producer-network-thread | producer-2] INFO  c.k.e.a.d.AsyncDataSharing - ≡ƒÅ¡ ΓåÆ warehouse event: STOCK_OUT PROD-E9 qty=10 newStock=96
+05:44:56.601 [virtual-37] INFO  c.k.e.a.d.AsyncDataSharing - [fulfillment] ≡ƒôª STOCK_OUT ΓåÆ product=PROD-E9 newStock=96 ΓÇö checking fulfillable orders
+05:44:56.601 [virtual-39] INFO  c.k.e.a.d.AsyncDataSharing - [reporting]   ≡ƒôè STOCK_OUT ΓåÆ product=PROD-E9 qty=10 ΓÇö updating inventory report
+05:44:56.907 [kafka-producer-network-thread | producer-2] INFO  c.k.e.a.d.AsyncDataSharing - ≡ƒÅ¡ ΓåÆ warehouse event: STOCK_IN PROD-B3 qty=48 newStock=130
+05:44:56.911 [virtual-39] INFO  c.k.e.a.d.AsyncDataSharing - [reporting]   ≡ƒôè STOCK_IN ΓåÆ product=PROD-B3 qty=48 ΓÇö updating inventory report
+05:44:56.911 [virtual-37] INFO  c.k.e.a.d.AsyncDataSharing - [fulfillment] ≡ƒôª STOCK_IN ΓåÆ product=PROD-B3 newStock=130 ΓÇö checking fulfillable orders
+05:44:56.997 [kafka-producer-network-thread | producer-1] INFO  c.k.e.a.d.AsyncDataSharing - ≡ƒÜÜ ΓåÆ shipment event: SHP-002 status=PACKED location=Berlin Warehouse
+05:44:56.999 [virtual-42] INFO  c.k.e.a.d.AsyncDataSharing - [customer-portal] ≡ƒûÑ∩╕Å  Updating tracking page: SHP-002 ΓåÆ PACKED @ Berlin Warehouse
+05:44:57.222 [kafka-producer-network-thread | producer-2] INFO  c.k.e.a.d.AsyncDataSharing - ≡ƒÅ¡ ΓåÆ warehouse event: STOCK_OUT PROD-B3 qty=23 newStock=16
+05:44:57.225 [virtual-37] INFO  c.k.e.a.d.AsyncDataSharing - [fulfillment] ≡ƒôª STOCK_OUT ΓåÆ product=PROD-B3 newStock=16 ΓÇö checking fulfillable orders
+05:44:57.225 [virtual-39] INFO  c.k.e.a.d.AsyncDataSharing - [reporting]   ≡ƒôè STOCK_OUT ΓåÆ product=PROD-B3 qty=23 ΓÇö updating inventory report
+05:44:57.405 [kafka-producer-network-thread | producer-1] INFO  c.k.e.a.d.AsyncDataSharing - ≡ƒÜÜ ΓåÆ shipment event: SHP-003 status=PICKED location=Hamburg Warehouse
+05:44:57.408 [virtual-42] INFO  c.k.e.a.d.AsyncDataSharing - [customer-portal] ≡ƒûÑ∩╕Å  Updating tracking page: SHP-003 ΓåÆ PICKED @ Hamburg Warehouse
+05:44:57.531 [kafka-producer-network-thread | producer-2] INFO  c.k.e.a.d.AsyncDataSharing - ≡ƒÅ¡ ΓåÆ warehouse event: STOCK_IN PROD-D2 qty=41 newStock=122
+05:44:57.537 [virtual-37] INFO  c.k.e.a.d.AsyncDataSharing - [fulfillment] ≡ƒôª STOCK_IN ΓåÆ product=PROD-D2 newStock=122 ΓÇö checking fulfillable orders
+05:44:57.537 [virtual-39] INFO  c.k.e.a.d.AsyncDataSharing - [reporting]   ≡ƒôè STOCK_IN ΓåÆ product=PROD-D2 qty=41 ΓÇö updating inventory report
+05:44:57.814 [kafka-producer-network-thread | producer-1] INFO  c.k.e.a.d.AsyncDataSharing - ≡ƒÜÜ ΓåÆ shipment event: SHP-001 status=DELIVERED location=Customer Address
+05:44:57.816 [virtual-40] INFO  c.k.e.a.d.AsyncDataSharing - [notifications] ≡ƒôº Sending 'DELIVERED' email for shipment=SHP-001 order=ORD-001
+05:44:57.816 [virtual-42] INFO  c.k.e.a.d.AsyncDataSharing - [customer-portal] ≡ƒûÑ∩╕Å  Updating tracking page: SHP-001 ΓåÆ DELIVERED @ Customer Address
+05:44:57.842 [kafka-producer-network-thread | producer-2] INFO  c.k.e.a.d.AsyncDataSharing - ≡ƒÅ¡ ΓåÆ warehouse event: STOCK_OUT PROD-C7 qty=33 newStock=119
+05:44:57.843 [virtual-39] INFO  c.k.e.a.d.AsyncDataSharing - [reporting]   ≡ƒôè STOCK_OUT ΓåÆ product=PROD-C7 qty=33 ΓÇö updating inventory report
+05:44:57.843 [virtual-37] INFO  c.k.e.a.d.AsyncDataSharing - [fulfillment] ≡ƒôª STOCK_OUT ΓåÆ product=PROD-C7 newStock=119 ΓÇö checking fulfillable orders
+05:44:58.159 [kafka-producer-network-thread | producer-2] INFO  c.k.e.a.d.AsyncDataSharing - ≡ƒÅ¡ ΓåÆ warehouse event: ADJUSTMENT PROD-D2 qty=34 newStock=131
+05:44:58.164 [virtual-37] INFO  c.k.e.a.d.AsyncDataSharing - [fulfillment] ≡ƒôª ADJUSTMENT ΓåÆ product=PROD-D2 newStock=131 ΓÇö checking fulfillable orders
+05:44:58.164 [virtual-39] INFO  c.k.e.a.d.AsyncDataSharing - [reporting]   ≡ƒôè ADJUSTMENT ΓåÆ product=PROD-D2 qty=34 ΓÇö updating inventory report
+05:44:58.217 [kafka-producer-network-thread | producer-1] INFO  c.k.e.a.d.AsyncDataSharing - ≡ƒÜÜ ΓåÆ shipment event: SHP-002 status=SHIPPED location=Berlin Hub
+05:44:58.219 [virtual-40] INFO  c.k.e.a.d.AsyncDataSharing - [notifications] ≡ƒôº Sending 'SHIPPED' email for shipment=SHP-002 order=ORD-002
+05:44:58.219 [virtual-42] INFO  c.k.e.a.d.AsyncDataSharing - [customer-portal] ≡ƒûÑ∩╕Å  Updating tracking page: SHP-002 ΓåÆ SHIPPED @ Berlin Hub
+05:44:58.474 [kafka-producer-network-thread | producer-2] INFO  c.k.e.a.d.AsyncDataSharing - ≡ƒÅ¡ ΓåÆ warehouse event: STOCK_IN PROD-C7 qty=32 newStock=105
+05:44:58.477 [virtual-37] INFO  c.k.e.a.d.AsyncDataSharing - [fulfillment] ≡ƒôª STOCK_IN ΓåÆ product=PROD-C7 newStock=105 ΓÇö checking fulfillable orders
+05:44:58.477 [virtual-39] INFO  c.k.e.a.d.AsyncDataSharing - [reporting]   ≡ƒôè STOCK_IN ΓåÆ product=PROD-C7 qty=32 ΓÇö updating inventory report
+05:44:58.784 [kafka-producer-network-thread | producer-2] INFO  c.k.e.a.d.AsyncDataSharing - ≡ƒÅ¡ ΓåÆ warehouse event: STOCK_IN PROD-C7 qty=45 newStock=130
+05:44:58.787 [virtual-37] INFO  c.k.e.a.d.AsyncDataSharing - [fulfillment] ≡ƒôª STOCK_IN ΓåÆ product=PROD-C7 newStock=130 ΓÇö checking fulfillable orders
+05:44:58.787 [virtual-39] INFO  c.k.e.a.d.AsyncDataSharing - [reporting]   ≡ƒôè STOCK_IN ΓåÆ product=PROD-C7 qty=45 ΓÇö updating inventory report
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  13.890 s
+[INFO] Finished at: 2026-06-12T05:45:06+02:00
+[INFO] ------------------------------------------------------------------------
+
+E:\kafka_2.13-2.8.1\bin\windows>kafka-run-class.bat kafka.tools.GetOffsetShell --broker-list localhost:9092 --topic logistics.warehouse.inventory-changed
+logistics.warehouse.inventory-changed:0:9
+logistics.warehouse.inventory-changed:1:0
+logistics.warehouse.inventory-changed:2:3
+
+E:\kafka_2.13-2.8.1\bin\windows>kafka-run-class.bat kafka.tools.GetOffsetShell --broker-list localhost:9092 --topic logistics.shipment.status-changed
+logistics.shipment.status-changed:0:0
+logistics.shipment.status-changed:1:5
+logistics.shipment.status-changed:2:3
+
+E:\kafka_2.13-2.8.1\bin\windows>kafka-consumer-groups.bat --bootstrap-server localhost:9092 --describe --group fulfillment-service-warehouse-group
+Consumer group 'fulfillment-service-warehouse-group' has no active members.
+GROUP                               TOPIC                                 PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG             CONSUMER-ID     HOST            CLIENT-ID
+fulfillment-service-warehouse-group logistics.warehouse.inventory-changed 2          3               3               0               -               -               -
+fulfillment-service-warehouse-group logistics.warehouse.inventory-changed 1          0               0               0               -               -               -
+fulfillment-service-warehouse-group logistics.warehouse.inventory-changed 0          9               9               0               -               -               -
+
+E:\kafka_2.13-2.8.1\bin\windows>kafka-consumer-groups.bat --bootstrap-server localhost:9092 --describe --group reporting-service-warehouse-group
+Consumer group 'reporting-service-warehouse-group' has no active members.
+GROUP                             TOPIC                                 PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG             CONSUMER-ID     HOST            CLIENT-ID
+reporting-service-warehouse-group logistics.warehouse.inventory-changed 2          3               3               0               -               -               -
+reporting-service-warehouse-group logistics.warehouse.inventory-changed 1          0               0               0               -               -               -
+reporting-service-warehouse-group logistics.warehouse.inventory-changed 0          9               9               0               -               -               -
+
+E:\kafka_2.13-2.8.1\bin\windows>kafka-consumer-groups.bat --bootstrap-server localhost:9092 --describe --group notification-service-shipment-group
+Consumer group 'notification-service-shipment-group' has no active members.
+GROUP                               TOPIC                             PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG             CONSUMER-ID     HOST            CLIENT-ID
+notification-service-shipment-group logistics.shipment.status-changed 2          3               3               0               -               -               -
+notification-service-shipment-group logistics.shipment.status-changed 0          0               0               0               -               -               -
+notification-service-shipment-group logistics.shipment.status-changed 1          5               5               0               -               -               -
+
+E:\kafka_2.13-2.8.1\bin\windows>kafka-consumer-groups.bat --bootstrap-server localhost:9092 --describe --group customer-portal-service-shipment-group
+Consumer group 'customer-portal-service-shipment-group' has no active members.
+GROUP                                  TOPIC                             PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG             CONSUMER-ID     HOST            CLIENT-ID
+customer-portal-service-shipment-group logistics.shipment.status-changed 2          3               3               0               -               -               -
+customer-portal-service-shipment-group logistics.shipment.status-changed 0          0               0               0               -               -               -
+customer-portal-service-shipment-group logistics.shipment.status-changed 1          5               5               0
+All 4 Section 2 archetypes complete. 
+
+Conclusion:
+4 services, 2 topics, zero coupling — all working:
+
+--Warehouse events (logistics.warehouse.inventory-changed) — 12 events:
+
+[fulfillment] reacted to every single one — checking if orders can now be fulfilled
+[reporting] reacted to every single one — updating inventory reports
+Both got identical events independently via separate consumer groups
+
+--Shipment events (logistics.shipment.status-changed) — 8 events:
+
+[customer-portal] updated tracking page on every status change (PICKED, PACKED, SHIPPED, DELIVERED)
+[notifications] only sent emails on SHIPPED and DELIVERED — ignored PICKED and PACKED
+
+That selective filtering is the key design point — each service decides what it cares about. The warehouse system just publishes everything, 
+it has no idea who's listening or what they do with it.
+
+SHP-001 full journey visible in the logs — in order:
+PICKED  → Munich Warehouse
+PACKED  → Munich Warehouse
+SHIPPED → Munich Hub         ← notification email sent here
+DELIVERED → Customer Address ← notification email sent here
+Ordering guaranteed because all SHP-001 events share the same partition key.
+
+======================================
+##Section 3: 
+#3.1 — KStream operations
+
+Terminal 1
+mvn exec:java -Dexec.mainClass="com.kafka.examples.streams.basics.KStreamOperations"
+--Wait until you see KStream operations topology started
+
+C:\Users\Ajay\Downloads\kafka-examples\kafka-examples>mvn exec:java -Dexec.mainClass="com.kafka.examples.streams.basics.KStreamOperations"
+[INFO] Scanning for projects...
+[INFO]
+[INFO] -----------------< com.kafka.examples:kafka-examples >------------------
+[INFO] Building Kafka Enterprise Examples 1.0.0
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO]
+[INFO] --- exec:3.2.0:java (default-cli) @ kafka-examples ---
+06:21:39.998 [com.kafka.examples.streams.basics.KStreamOperations.main()] INFO  c.k.e.config.KafkaConfig - Γ£à Created topic: streams.sensor.readings
+06:21:40.002 [com.kafka.examples.streams.basics.KStreamOperations.main()] INFO  c.k.e.config.KafkaConfig - Γ£à Created topic: streams.sensor.alerts
+06:21:40.252 [com.kafka.examples.streams.basics.KStreamOperations.main()] INFO  c.k.e.s.b.KStreamOperations - Γ£à KStream operations topology started.
+06:21:40.253 [com.kafka.examples.streams.basics.KStreamOperations.main()] INFO  c.k.e.s.b.KStreamOperations -    Run SensorDataProducer to push sensor readings.
+06:22:55.296 [kstream-operations-demo-d30d1c03-a308-40fd-a214-3a13ff584853-StreamThread-1] INFO  c.k.e.s.b.KStreamOperations - ≡ƒôí Raw reading received: sensorId=SENS-001
+06:22:55.553 [kstream-operations-demo-d30d1c03-a308-40fd-a214-3a13ff584853-StreamThread-1] INFO  c.k.e.s.b.KStreamOperations - ≡ƒôí Raw reading received: sensorId=SENS-002
+06:23:05.805 [kstream-operations-demo-d30d1c03-a308-40fd-a214-3a13ff584853-StreamThread-1] INFO  c.k.e.s.b.KStreamOperations - ≡ƒôí Raw reading received: sensorId=SENS-003
+06:23:05.823 [kstream-operations-demo-d30d1c03-a308-40fd-a214-3a13ff584853-StreamThread-1] INFO  c.k.e.s.b.KStreamOperations - ≡ƒîí∩╕Å  WARNING alert: sensorId=SENS-003 temp=78.5┬░C location=FactoryFloor-B
+06:23:05.845 [kstream-operations-demo-d30d1c03-a308-40fd-a214-3a13ff584853-StreamThread-1] INFO  c.k.e.s.b.KStreamOperations - ≡ƒƒí WARNING  ALERT ΓåÆ sensorId=SENS-003
+06:23:05.860 [kstream-operations-demo-d30d1c03-a308-40fd-a214-3a13ff584853-StreamThread-1] INFO  c.k.e.s.b.KStreamOperations - ≡ƒöÇ flatMap output: key=SENS-003-TEMP val=TEMP_ALERT:78.5
+06:23:05.862 [kstream-operations-demo-d30d1c03-a308-40fd-a214-3a13ff584853-StreamThread-1] INFO  c.k.e.s.b.KStreamOperations - ≡ƒôí Raw reading received: sensorId=SENS-001
+06:23:05.863 [kstream-operations-demo-d30d1c03-a308-40fd-a214-3a13ff584853-StreamThread-1] INFO  c.k.e.s.b.KStreamOperations - ≡ƒîí∩╕Å  CRITICAL alert: sensorId=SENS-001 temp=91.3┬░C location=FactoryFloor-A
+06:23:05.864 [kstream-operations-demo-d30d1c03-a308-40fd-a214-3a13ff584853-StreamThread-1] INFO  c.k.e.s.b.KStreamOperations - ≡ƒö┤ CRITICAL ALERT ΓåÆ sensorId=SENS-001
+06:23:05.866 [kstream-operations-demo-d30d1c03-a308-40fd-a214-3a13ff584853-StreamThread-1] INFO  c.k.e.s.b.KStreamOperations - ≡ƒöÇ flatMap output: key=SENS-001-TEMP val=TEMP_ALERT:91.3
+06:23:05.866 [kstream-operations-demo-d30d1c03-a308-40fd-a214-3a13ff584853-StreamThread-1] INFO  c.k.e.s.b.KStreamOperations - ≡ƒôí Raw reading received: sensorId=SENS-004
+06:23:05.873 [kstream-operations-demo-d30d1c03-a308-40fd-a214-3a13ff584853-StreamThread-1] INFO  c.k.e.s.b.KStreamOperations - ≡ƒîí∩╕Å  WARNING alert: sensorId=SENS-004 temp=82.1┬░C location=Warehouse-North
+06:23:05.873 [kstream-operations-demo-d30d1c03-a308-40fd-a214-3a13ff584853-StreamThread-1] INFO  c.k.e.s.b.KStreamOperations - ≡ƒƒí WARNING  ALERT ΓåÆ sensorId=SENS-004
+06:23:05.874 [kstream-operations-demo-d30d1c03-a308-40fd-a214-3a13ff584853-StreamThread-1] INFO  c.k.e.s.b.KStreamOperations - ≡ƒöÇ flatMap output: key=SENS-004-TEMP val=TEMP_ALERT:82.1
+06:23:05.874 [kstream-operations-demo-d30d1c03-a308-40fd-a214-3a13ff584853-StreamThread-1] INFO  c.k.e.s.b.KStreamOperations - ≡ƒôí Raw reading received: sensorId=SENS-003
+06:23:05.876 [kstream-operations-demo-d30d1c03-a308-40fd-a214-3a13ff584853-StreamThread-1] INFO  c.k.e.s.b.KStreamOperations - ≡ƒÆº High humidity @ location=Warehouse-North humidity=92.0%
+06:23:05.878 [kstream-operations-demo-d30d1c03-a308-40fd-a214-3a13ff584853-StreamThread-1] INFO  c.k.e.s.b.KStreamOperations - ≡ƒöÇ flatMap output: key=SENS-003-HUM val=HUMIDITY_ALERT:92.0
+06:23:05.879 [kstream-operations-demo-d30d1c03-a308-40fd-a214-3a13ff584853-StreamThread-1] INFO  c.k.e.s.b.KStreamOperations - ≡ƒôí Raw reading received: sensorId=SENS-005
+06:23:05.880 [kstream-operations-demo-d30d1c03-a308-40fd-a214-3a13ff584853-StreamThread-1] INFO  c.k.e.s.b.KStreamOperations - ≡ƒîí∩╕Å  CRITICAL alert: sensorId=SENS-005 temp=94.7┬░C location=ServerRoom-1
+06:23:05.885 [kstream-operations-demo-d30d1c03-a308-40fd-a214-3a13ff584853-StreamThread-1] INFO  c.k.e.s.b.KStreamOperations - ≡ƒö┤ CRITICAL ALERT ΓåÆ sensorId=SENS-005
+06:23:05.887 [kstream-operations-demo-d30d1c03-a308-40fd-a214-3a13ff584853-StreamThread-1] INFO  c.k.e.s.b.KStreamOperations - ≡ƒöÇ flatMap output: key=SENS-005-TEMP val=TEMP_ALERT:94.7
+06:23:05.889 [kstream-operations-demo-d30d1c03-a308-40fd-a214-3a13ff584853-StreamThread-1] INFO  c.k.e.s.b.KStreamOperations - ≡ƒôí Raw reading received: sensorId=SENS-002
+06:23:05.890 [kstream-operations-demo-d30d1c03-a308-40fd-a214-3a13ff584853-StreamThread-1] INFO  c.k.e.s.b.KStreamOperations - ≡ƒÆº High humidity @ location=FactoryFloor-B humidity=85.5%
+06:23:05.890 [kstream-operations-demo-d30d1c03-a308-40fd-a214-3a13ff584853-StreamThread-1] INFO  c.k.e.s.b.KStreamOperations - ≡ƒöÇ flatMap output: key=SENS-002-HUM val=HUMIDITY_ALERT:85.5
+06:23:05.891 [kstream-operations-demo-d30d1c03-a308-40fd-a214-3a13ff584853-StreamThread-1] INFO  c.k.e.s.b.KStreamOperations - ≡ƒôí Raw reading received: sensorId=SENS-004
+06:23:05.892 [kstream-operations-demo-d30d1c03-a308-40fd-a214-3a13ff584853-StreamThread-1] INFO  c.k.e.s.b.KStreamOperations - ≡ƒôí Raw reading received: sensorId=SENS-005
+
+Terminal 2
+mvn exec:java -Dexec.mainClass="com.kafka.examples.streams.basics.SensorDataProducer"
+C:\Users\Ajay\Downloads\kafka-examples\kafka-examples>mvn exec:java -Dexec.mainClass="com.kafka.examples.streams.basics.SensorDataProducer"
+[INFO] Scanning for projects...
+[INFO]
+[INFO] -----------------< com.kafka.examples:kafka-examples >------------------
+[INFO] Building Kafka Enterprise Examples 1.0.0
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO]
+[INFO] --- exec:3.2.0:java (default-cli) @ kafka-examples ---
+06:22:54.908 [com.kafka.examples.streams.basics.SensorDataProducer.main()] INFO  c.k.e.config.KafkaConfig - Γ£à Created topic: streams.sensor.humidity-alerts
+06:22:55.260 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.b.SensorDataProducer - ≡ƒôí Published: sensorId=SENS-001 temp=62.3 humidity=55.0
+06:22:55.550 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.b.SensorDataProducer - ≡ƒôí Published: sensorId=SENS-002 temp=68.0 humidity=40.0
+06:22:55.859 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.b.SensorDataProducer - ≡ƒôí Published: sensorId=SENS-003 temp=78.5 humidity=60.0
+06:22:56.173 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.b.SensorDataProducer - ≡ƒôí Published: sensorId=SENS-004 temp=82.1 humidity=72.0
+06:22:56.482 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.b.SensorDataProducer - ≡ƒôí Published: sensorId=SENS-005 temp=94.7 humidity=45.0
+06:22:56.795 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.b.SensorDataProducer - ≡ƒôí Published: sensorId=SENS-001 temp=91.3 humidity=58.0
+06:22:57.104 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.b.SensorDataProducer - ≡ƒôí Published: sensorId=SENS-002 temp=70.0 humidity=85.5
+06:22:57.418 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.b.SensorDataProducer - ≡ƒôí Published: sensorId=SENS-003 temp=65.0 humidity=92.0
+06:22:57.730 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.b.SensorDataProducer - ≡ƒôí Published: sensorId=SENS-004 temp=55.0 humidity=50.0
+06:22:58.037 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.b.SensorDataProducer - ≡ƒôí Published: sensorId=SENS-005 temp=71.2 humidity=38.0
+06:22:58.347 [com.kafka.examples.streams.basics.SensorDataProducer.main()] INFO  c.k.e.s.b.SensorDataProducer - Γ£à All sensor readings published.
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  5.149 s
+[INFO] Finished at: 2026-06-12T06:22:58+02:00
+[INFO] ------------------------------------------------------------------------
+
+Conclusion:
+All 6 KStream operations firing correctly:
+Operation		What fired			Example from your logs
+peek()		Every record logged on arrival		Raw reading received: sensorId=SENS-002
+filter()	Only temp > 75°C passed			SENS-001(62°), SENS-002(68°), SENS-004(55°), SENS-005(71°) silently dropped
+mapValues()	Severity assigned			SENS-003(78°) → WARNING, SENS-005(94°) → CRITICAL
+branch()	Split into WARNING vs CRITICAL		Two separate sub-streams
+merge()		Both sent to alerts topic		All alerts on one output topic
+selectKey()	Rekeyed by location			High humidity @ location=FactoryFloor-B
+flatMap()	One record → multiple outputs		SENS-002-HUM → HUMIDITY_ALERT:85.5
+
+The humidity path is particularly interesting — SENS-002 had temp=70°C (filtered out from alerts) but humidity=85.5% (above 80 threshold). 
+So it went through the separate humidity branch via selectKey() rekeyed by location, and flatMap() 
+produced a HUMIDITY_ALERT output. One record, two different processing paths.
+
+E:\kafka_2.13-2.8.1\bin\windows>kafka-run-class.bat kafka.tools.GetOffsetShell --broker-list localhost:9092 --topic streams.sensor.readings
+streams.sensor.readings:0:2
+streams.sensor.readings:1:4
+streams.sensor.readings:2:4
+
+E:\kafka_2.13-2.8.1\bin\windows>kafka-run-class.bat kafka.tools.GetOffsetShell --broker-list localhost:9092 --topic streams.sensor.alerts
+streams.sensor.alerts:0:1
+streams.sensor.alerts:1:2
+streams.sensor.alerts:2:1
+
+E:\kafka_2.13-2.8.1\bin\windows>kafka-run-class.bat kafka.tools.GetOffsetShell --broker-list localhost:9092 --topic streams.sensor.humidity-alerts
+streams.sensor.humidity-alerts:0:1
+streams.sensor.humidity-alerts:1:0
+streams.sensor.humidity-alerts:2:1
+
+E:\kafka_2.13-2.8.1\bin\windows>kafka-consumer-groups.bat --bootstrap-server localhost:9092 --describe --group kstream-operations-demo
+
+GROUP                   TOPIC                   PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG             CONSUMER-ID                                                                                                               HOST            CLIENT-ID
+kstream-operations-demo streams.sensor.readings 0          2               2               0               kstream-operations-demo-7a2aa501-14d7-4c3e-a3f0-201ebb7feb3f-StreamThread-1-consumer-a50a5c1b-3aa5-4bdc-a75a-ae5477d0fea3 /127.0.0.1      kstream-operations-demo-7a2aa501-14d7-4c3e-a3f0-201ebb7feb3f-StreamThread-1-consumer
+kstream-operations-demo streams.sensor.readings 1          4               4               0               kstream-operations-demo-7a2aa501-14d7-4c3e-a3f0-201ebb7feb3f-StreamThread-1-consumer-a50a5c1b-3aa5-4bdc-a75a-ae5477d0fea3 /127.0.0.1      kstream-operations-demo-7a2aa501-14d7-4c3e-a3f0-201ebb7feb3f-StreamThread-1-consumer
+kstream-operations-demo streams.sensor.readings 2          4               4               0               kstream-operations-demo-7a2aa501-14d7-4c3e-a3f0-201ebb7feb3f-StreamThread-1-consumer-a50a5c1b-3aa5-4bdc-a75a-ae5477d0fea3 /127.0.0.1      kstream-operations-demo-7a2aa501-14d7-4c3e-a3f0-201ebb7feb3f-StreamThread-1-consumer
+---------------------
+#3.2 — all three join types
+
+Terminal 1:
+mvn exec:java -Dexec.mainClass="com.kafka.examples.streams.joins.JoinExamples"
+--Wait for Join topology started
+
+C:\Users\Ajay\Downloads\kafka-examples\kafka-examples>mvn exec:java -Dexec.mainClass="com.kafka.examples.streams.joins.JoinExamples"
+[INFO] Scanning for projects...
+[INFO]
+[INFO] -----------------< com.kafka.examples:kafka-examples >------------------
+[INFO] Building Kafka Enterprise Examples 1.0.0
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO]
+[INFO] --- exec:3.2.0:java (default-cli) @ kafka-examples ---
+06:26:44.224 [com.kafka.examples.streams.joins.JoinExamples.main()] INFO  c.k.e.config.KafkaConfig - Γ£à Created topic: joins.click-events
+06:26:44.228 [com.kafka.examples.streams.joins.JoinExamples.main()] INFO  c.k.e.config.KafkaConfig - Γ£à Created topic: joins.purchase-events
+06:26:44.234 [com.kafka.examples.streams.joins.JoinExamples.main()] INFO  c.k.e.config.KafkaConfig - Γ£à Created topic: joins.user-preferences
+06:26:44.234 [com.kafka.examples.streams.joins.JoinExamples.main()] INFO  c.k.e.config.KafkaConfig - Γ£à Created topic: joins.region-map
+06:26:44.235 [com.kafka.examples.streams.joins.JoinExamples.main()] INFO  c.k.e.config.KafkaConfig - Γ£à Created topic: joins.click-purchase-joined
+06:26:44.236 [com.kafka.examples.streams.joins.JoinExamples.main()] INFO  c.k.e.config.KafkaConfig - Γ£à Created topic: joins.enriched-clicks
+06:26:44.357 [com.kafka.examples.streams.joins.JoinExamples.main()] ERROR o.a.k.s.p.i.StateDirectory - Failed to change permissions for the directory \tmp\kafka-streams-examples
+06:26:44.358 [com.kafka.examples.streams.joins.JoinExamples.main()] ERROR o.a.k.s.p.i.StateDirectory - Failed to change permissions for the directory \tmp\kafka-streams-examples\join-examples
+06:26:44.996 [com.kafka.examples.streams.joins.JoinExamples.main()] INFO  c.k.e.s.joins.JoinExamples - Γ£à Join topology started. Run JoinDataProducer in another terminal.
+06:27:14.440 [join-examples-aa58ae0f-c9f3-4b3b-91b3-90486442f698-StreamThread-1] INFO  c.k.e.s.joins.JoinExamples - ≡ƒöù [KStream-KTable] Click enriched with user preferences
+06:27:14.443 [join-examples-aa58ae0f-c9f3-4b3b-91b3-90486442f698-StreamThread-1] INFO  c.k.e.s.joins.JoinExamples -    ΓåÆ Enriched click for userId=U-001
+06:27:14.447 [join-examples-aa58ae0f-c9f3-4b3b-91b3-90486442f698-StreamThread-1] INFO  c.k.e.s.joins.JoinExamples - ≡ƒöù [KStream-GlobalKTable] Click enriched with region data (no repartition)
+06:27:14.449 [join-examples-aa58ae0f-c9f3-4b3b-91b3-90486442f698-StreamThread-1] INFO  c.k.e.s.joins.JoinExamples -    ΓåÆ Region-enriched click for userId=U-001
+06:27:14.488 [join-examples-aa58ae0f-c9f3-4b3b-91b3-90486442f698-StreamThread-1] INFO  c.k.e.s.joins.JoinExamples - ≡ƒöù [KStream-KTable] Click enriched with user preferences
+06:27:14.488 [join-examples-aa58ae0f-c9f3-4b3b-91b3-90486442f698-StreamThread-1] INFO  c.k.e.s.joins.JoinExamples -    ΓåÆ Enriched click for userId=U-002
+06:27:14.491 [join-examples-aa58ae0f-c9f3-4b3b-91b3-90486442f698-StreamThread-1] INFO  c.k.e.s.joins.JoinExamples - ≡ƒöù [KStream-GlobalKTable] Click enriched with region data (no repartition)
+06:27:14.495 [join-examples-aa58ae0f-c9f3-4b3b-91b3-90486442f698-StreamThread-1] INFO  c.k.e.s.joins.JoinExamples -    ΓåÆ Region-enriched click for userId=U-002
+06:27:14.496 [join-examples-aa58ae0f-c9f3-4b3b-91b3-90486442f698-StreamThread-1] INFO  c.k.e.s.joins.JoinExamples - ≡ƒöù [KStream-KTable] Click enriched with user preferences
+06:27:14.496 [join-examples-aa58ae0f-c9f3-4b3b-91b3-90486442f698-StreamThread-1] INFO  c.k.e.s.joins.JoinExamples -    ΓåÆ Enriched click for userId=U-003
+06:27:14.497 [join-examples-aa58ae0f-c9f3-4b3b-91b3-90486442f698-StreamThread-1] INFO  c.k.e.s.joins.JoinExamples - ≡ƒöù [KStream-GlobalKTable] Click enriched with region data (no repartition)
+06:27:14.498 [join-examples-aa58ae0f-c9f3-4b3b-91b3-90486442f698-StreamThread-1] INFO  c.k.e.s.joins.JoinExamples -    ΓåÆ Region-enriched click for userId=U-003
+06:27:14.500 [join-examples-aa58ae0f-c9f3-4b3b-91b3-90486442f698-StreamThread-1] INFO  c.k.e.s.joins.JoinExamples - ≡ƒöù [KStream-KTable] Click enriched with user preferences
+06:27:14.500 [join-examples-aa58ae0f-c9f3-4b3b-91b3-90486442f698-StreamThread-1] INFO  c.k.e.s.joins.JoinExamples -    ΓåÆ Enriched click for userId=U-004
+06:27:14.501 [join-examples-aa58ae0f-c9f3-4b3b-91b3-90486442f698-StreamThread-1] INFO  c.k.e.s.joins.JoinExamples - ≡ƒöù [KStream-GlobalKTable] Click enriched with region data (no repartition)
+06:27:14.501 [join-examples-aa58ae0f-c9f3-4b3b-91b3-90486442f698-StreamThread-1] INFO  c.k.e.s.joins.JoinExamples -    ΓåÆ Region-enriched click for userId=U-004
+06:27:14.916 [join-examples-aa58ae0f-c9f3-4b3b-91b3-90486442f698-StreamThread-1] INFO  c.k.e.s.joins.JoinExamples - ≡ƒöù [KStream-KStream] Conversion detected! click+purchase matched within window
+06:27:14.917 [join-examples-aa58ae0f-c9f3-4b3b-91b3-90486442f698-StreamThread-1] INFO  c.k.e.s.joins.JoinExamples -    ΓåÆ Conversion result: userId=U-001
+06:27:14.982 [join-examples-aa58ae0f-c9f3-4b3b-91b3-90486442f698-StreamThread-1] INFO  c.k.e.s.joins.JoinExamples - ≡ƒöù [KStream-KStream] Conversion detected! click+purchase matched within window
+06:27:14.983 [join-examples-aa58ae0f-c9f3-4b3b-91b3-90486442f698-StreamThread-1] INFO  c.k.e.s.joins.JoinExamples -    ΓåÆ Conversion result: userId=U-003
+Terminate batch job (Y/N)? Y
+
+Terminal 2:
+mvn exec:java -Dexec.mainClass="com.kafka.examples.streams.joins.JoinDataProducer"
+[INFO] Scanning for projects...
+[INFO]
+[INFO] -----------------< com.kafka.examples:kafka-examples >------------------
+[INFO] Building Kafka Enterprise Examples 1.0.0
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO]
+[INFO] --- exec:3.2.0:java (default-cli) @ kafka-examples ---
+06:27:11.200 [com.kafka.examples.streams.joins.JoinDataProducer.main()] INFO  c.k.e.config.KafkaConfig - Topics already exist, skipping creation
+06:27:11.276 [com.kafka.examples.streams.joins.JoinDataProducer.main()] INFO  c.k.e.s.joins.JoinDataProducer - Seeding region map (GlobalKTable)...
+06:27:12.346 [com.kafka.examples.streams.joins.JoinDataProducer.main()] INFO  c.k.e.s.joins.JoinDataProducer - Seeding user preferences (KTable)...
+06:27:14.364 [com.kafka.examples.streams.joins.JoinDataProducer.main()] INFO  c.k.e.s.joins.JoinDataProducer - Publishing click events...
+06:27:14.377 [com.kafka.examples.streams.joins.JoinDataProducer.main()] INFO  c.k.e.s.joins.JoinDataProducer - ≡ƒôñ Click: userId=U-001
+06:27:14.380 [com.kafka.examples.streams.joins.JoinDataProducer.main()] INFO  c.k.e.s.joins.JoinDataProducer - ≡ƒôñ Click: userId=U-002
+06:27:14.382 [com.kafka.examples.streams.joins.JoinDataProducer.main()] INFO  c.k.e.s.joins.JoinDataProducer - ≡ƒôñ Click: userId=U-003
+06:27:14.383 [com.kafka.examples.streams.joins.JoinDataProducer.main()] INFO  c.k.e.s.joins.JoinDataProducer - ≡ƒôñ Click: userId=U-004
+06:27:14.894 [com.kafka.examples.streams.joins.JoinDataProducer.main()] INFO  c.k.e.s.joins.JoinDataProducer - Publishing purchase events (within join window)...
+06:27:14.900 [com.kafka.examples.streams.joins.JoinDataProducer.main()] INFO  c.k.e.s.joins.JoinDataProducer - ≡ƒôñ Purchase: userId=U-001
+06:27:14.902 [com.kafka.examples.streams.joins.JoinDataProducer.main()] INFO  c.k.e.s.joins.JoinDataProducer - ≡ƒôñ Purchase: userId=U-003
+06:27:14.914 [com.kafka.examples.streams.joins.JoinDataProducer.main()] INFO  c.k.e.s.joins.JoinDataProducer - Γ£à All join test data published.
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  5.226 s
+[INFO] Finished at: 2026-06-12T06:27:14+02:00
+[INFO] ------------------------------------------------------------------------
+
+Conclusion:
+KStream-KTable join — every click enriched with user preferences:
+
+U-001, U-002, U-003 got their theme, lang, region from the KTable
+U-004 had no preference record seeded → left join passed through with default
+
+KStream-GlobalKTable join — every click enriched with region data:
+Fired for all 4 users with no repartitioning — notice there's no selectKey() shuffle in the logs
+The join key was extracted from the value (EU/US) not the record key (userId) — impossible with a regular KTable
+
+KStream-KStream join — conversion detection:
+U-001 clicked then purchased within the 5-minute window → CONVERSION detected
+U-003 same → CONVERSION detected
+U-002 clicked but no purchase within window → no conversion (correct)
+U-004 clicked but no purchase → no conversion (correct)
+
+The key difference between the three joins — worth remembering:
+KStream-KTable       → latest state lookup, same key, no window
+KStream-GlobalKTable → lookup by any field, no repartition, small tables only
+KStream-KStream      → correlate two event streams, requires time window
+
+-------------------------------------------
+#3.3 — Windowing - This one has deliberate timing gaps so it takes about 45 seconds to run
+
+Terminal 1:
+mvn exec:java -Dexec.mainClass="com.kafka.examples.streams.windowing.WindowingExamples"
+--Wait for Windowing topology started
+C:\Users\Ajay\Downloads\kafka-examples\kafka-examples>mvn exec:java -Dexec.mainClass="com.kafka.examples.streams.windowing.WindowingExamples"
+[INFO] Scanning for projects...
+[INFO]
+[INFO] -----------------< com.kafka.examples:kafka-examples >------------------
+[INFO] Building Kafka Enterprise Examples 1.0.0
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO]
+[INFO] --- exec:3.2.0:java (default-cli) @ kafka-examples ---
+06:29:10.681 [com.kafka.examples.streams.windowing.WindowingExamples.main()] INFO  c.k.e.config.KafkaConfig - Γ£à Created topic: windowing.click-events
+06:29:10.686 [com.kafka.examples.streams.windowing.WindowingExamples.main()] INFO  c.k.e.config.KafkaConfig - Γ£à Created topic: windowing.counts.tumbling
+06:29:10.688 [com.kafka.examples.streams.windowing.WindowingExamples.main()] INFO  c.k.e.config.KafkaConfig - Γ£à Created topic: windowing.counts.hopping
+06:29:10.693 [com.kafka.examples.streams.windowing.WindowingExamples.main()] INFO  c.k.e.config.KafkaConfig - Γ£à Created topic: windowing.counts.session
+06:29:10.822 [com.kafka.examples.streams.windowing.WindowingExamples.main()] ERROR o.a.k.s.p.i.StateDirectory - Failed to change permissions for the directory \tmp\kafka-streams-examples
+06:29:10.822 [com.kafka.examples.streams.windowing.WindowingExamples.main()] ERROR o.a.k.s.p.i.StateDirectory - Failed to change permissions for the directory \tmp\kafka-streams-examples\windowing-examples
+06:29:11.210 [com.kafka.examples.streams.windowing.WindowingExamples.main()] INFO  c.k.e.s.w.WindowingExamples - Γ£à Windowing topology started. Run ClickEventProducer in another terminal.
+06:29:37.108 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-002 count=106:29:37.111 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-002 count=106:29:37.111 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-002 count=106:29:37.160 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [SESSION gap=15s] userId=U-002 sessionStart=2026-06-12T04:29:35.962Z pagesViewed=1
+06:29:38.336 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-001 count=106:29:38.336 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-001 count=106:29:38.338 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-001 count=106:29:38.378 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [SESSION gap=15s] userId=U-001 sessionStart=2026-06-12T04:29:36.795Z pagesViewed=1
+06:29:38.386 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-002 count=206:29:38.386 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-002 count=206:29:38.387 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-002 count=206:29:38.388 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [SESSION gap=15s] userId=U-002 sessionStart=2026-06-12T04:29:35.962Z pagesViewed=2
+06:29:39.440 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-001 count=206:29:39.441 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-001 count=206:29:39.443 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-001 count=206:29:39.444 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [SESSION gap=15s] userId=U-001 sessionStart=2026-06-12T04:29:36.795Z pagesViewed=2
+06:29:39.454 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-002 count=306:29:39.454 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-002 count=306:29:39.457 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-002 count=306:29:39.458 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [SESSION gap=15s] userId=U-002 sessionStart=2026-06-12T04:29:35.962Z pagesViewed=3
+06:29:40.472 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [TUMBLING 10s] userId=U-001 window=[2026-06-12T04:29:30Z ΓåÆ 2026-06-12T04:29:40Z] clickCount=2
+06:29:40.476 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-001 count=306:29:40.477 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-001 count=306:29:40.478 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-001 count=106:29:40.483 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [SESSION gap=15s] userId=U-001 sessionStart=2026-06-12T04:29:36.795Z pagesViewed=3
+06:29:41.503 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-003 count=106:29:41.504 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-003 count=106:29:41.506 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-003 count=106:29:41.512 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [SESSION gap=15s] userId=U-003 sessionStart=2026-06-12T04:29:40.846Z pagesViewed=1
+06:29:42.531 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-001 count=406:29:42.532 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-001 count=406:29:42.534 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-001 count=206:29:42.539 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [SESSION gap=15s] userId=U-001 sessionStart=2026-06-12T04:29:36.795Z pagesViewed=4
+06:29:54.493 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [TUMBLING 10s] userId=U-001 window=[2026-06-12T04:29:40Z ΓåÆ 2026-06-12T04:29:50Z] clickCount=2
+06:29:54.493 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [TUMBLING 10s] userId=U-003 window=[2026-06-12T04:29:40Z ΓåÆ 2026-06-12T04:29:50Z] clickCount=1
+06:29:54.498 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-003 count=206:29:54.499 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-003 count=206:29:54.508 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-003 count=106:29:54.509 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [SESSION gap=15s] userId=U-003 sessionStart=2026-06-12T04:29:40.846Z pagesViewed=2
+06:29:55.623 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-003 count=306:29:55.624 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-003 count=306:29:55.625 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-003 count=206:29:55.631 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [SESSION gap=15s] userId=U-003 sessionStart=2026-06-12T04:29:40.846Z pagesViewed=3
+06:29:56.747 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-001 count=506:29:56.749 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-001 count=306:29:56.754 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-001 count=106:29:56.756 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [SESSION gap=15s] userId=U-001 sessionStart=2026-06-12T04:29:36.795Z pagesViewed=5
+06:29:57.868 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-001 count=606:29:57.870 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-001 count=406:29:57.872 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-001 count=206:29:57.877 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [SESSION gap=15s] userId=U-001 sessionStart=2026-06-12T04:29:36.795Z pagesViewed=6
+06:29:58.972 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-003 count=406:29:58.974 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-003 count=406:29:58.977 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-003 count=306:29:58.984 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [SESSION gap=15s] userId=U-003 sessionStart=2026-06-12T04:29:40.846Z pagesViewed=4
+06:30:19.768 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [TUMBLING 10s] userId=U-001 window=[2026-06-12T04:29:50Z ΓåÆ 2026-06-12T04:30:00Z] clickCount=2
+06:30:19.769 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [TUMBLING 10s] userId=U-003 window=[2026-06-12T04:29:50Z ΓåÆ 2026-06-12T04:30:00Z] clickCount=3
+06:30:19.771 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-001 count=3
+06:30:19.848 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-001 count=1
+06:30:19.848 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-001 count=1
+06:30:19.910 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [SESSION gap=15s] userId=U-001 sessionStart=2026-06-12T04:30:19.560Z pagesViewed=1
+06:30:20.925 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [TUMBLING 10s] userId=U-001 window=[2026-06-12T04:30:10Z ΓåÆ 2026-06-12T04:30:20Z] clickCount=1
+06:30:20.928 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-003 count=2
+06:30:20.929 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-003 count=2
+06:30:20.932 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-003 count=2
+06:30:20.933 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [SESSION gap=15s] userId=U-003 sessionStart=2026-06-12T04:30:20.068Z pagesViewed=2
+06:30:22.075 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [TUMBLING 10s] userId=U-002 window=[2026-06-12T04:29:30Z ΓåÆ 2026-06-12T04:29:40Z] clickCount=3
+06:30:22.148 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-002 count=1
+06:30:22.149 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-002 count=1
+06:30:22.150 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [HOPPING 30s/10s] userId=U-002 count=1
+06:30:22.211 [windowing-examples-bc26bbfc-6e8d-4b2e-bdde-05b03942b707-StreamThread-1] INFO  c.k.e.s.w.WindowingExamples - ≡ƒ¬ƒ [SESSION gap=15s] userId=U-002 sessionStart=2026-06-12T04:30:21.083Z pagesViewed=1
+
+Terminal 2:
+mvn exec:java -Dexec.mainClass="com.kafka.examples.streams.windowing.ClickEventProducer"
+C:\Users\Ajay\Downloads\kafka-examples\kafka-examples>mvn exec:java -Dexec.mainClass="com.kafka.examples.streams.windowing.ClickEventProducer"
+[INFO] Scanning for projects...
+[INFO]
+[INFO] -----------------< com.kafka.examples:kafka-examples >------------------
+[INFO] Building Kafka Enterprise Examples 1.0.0
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO]
+[INFO] --- exec:3.2.0:java (default-cli) @ kafka-examples ---
+06:29:35.872 [com.kafka.examples.streams.windowing.ClickEventProducer.main()] INFO  c.k.e.config.KafkaConfig - Topics already exist, skipping creation
+06:29:35.946 [com.kafka.examples.streams.windowing.ClickEventProducer.main()] INFO  c.k.e.s.w.ClickEventProducer - Phase 1: Burst of clicks (same 10s tumbling window)...
+06:29:36.004 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.w.ClickEventProducer - ≡ƒôñ click: user=U-002 page=/profile
+06:29:36.798 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.w.ClickEventProducer - ≡ƒôñ click: user=U-001 page=/profile
+06:29:37.613 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.w.ClickEventProducer - ≡ƒôñ click: user=U-002 page=/home
+06:29:38.416 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.w.ClickEventProducer - ≡ƒôñ click: user=U-001 page=/cart
+06:29:39.225 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.w.ClickEventProducer - ≡ƒôñ click: user=U-002 page=/product/A1
+06:29:40.038 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.w.ClickEventProducer - ≡ƒôñ click: user=U-001 page=/cart
+06:29:40.849 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.w.ClickEventProducer - ≡ƒôñ click: user=U-003 page=/checkout
+06:29:41.662 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.w.ClickEventProducer - ≡ƒôñ click: user=U-001 page=/checkout
+06:29:42.467 [com.kafka.examples.streams.windowing.ClickEventProducer.main()] INFO  c.k.e.s.w.ClickEventProducer - Phase 2: Pause 12s (crosses tumbling window boundary)...
+06:29:54.480 [com.kafka.examples.streams.windowing.ClickEventProducer.main()] INFO  c.k.e.s.w.ClickEventProducer - Phase 3: More clicks in next tumbling window...
+06:29:54.488 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.w.ClickEventProducer - ≡ƒôñ click: user=U-003 page=/product/A1
+06:29:55.503 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.w.ClickEventProducer - ≡ƒôñ click: user=U-003 page=/home
+06:29:56.518 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.w.ClickEventProducer - ≡ƒôñ click: user=U-001 page=/product/A1
+06:29:57.531 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.w.ClickEventProducer - ≡ƒôñ click: user=U-001 page=/cart
+06:29:58.539 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.w.ClickEventProducer - ≡ƒôñ click: user=U-003 page=/home
+06:29:59.551 [com.kafka.examples.streams.windowing.ClickEventProducer.main()] INFO  c.k.e.s.w.ClickEventProducer - Phase 4: Pause 20s to close all session windows (gap > 15s)...
+06:30:19.558 [com.kafka.examples.streams.windowing.ClickEventProducer.main()] INFO  c.k.e.s.w.ClickEventProducer - Phase 5: New clicks ΓåÆ new session windows...
+06:30:19.561 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.w.ClickEventProducer - ≡ƒôñ new-session click: user=U-001
+06:30:20.074 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.w.ClickEventProducer - ≡ƒôñ new-session click: user=U-003
+06:30:20.587 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.w.ClickEventProducer - ≡ƒôñ new-session click: user=U-003
+06:30:21.089 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.w.ClickEventProducer - ≡ƒôñ new-session click: user=U-002
+06:30:21.597 [com.kafka.examples.streams.windowing.ClickEventProducer.main()] INFO  c.k.e.s.w.ClickEventProducer - Γ£à All click events published. Watch WindowingExamples for window output.
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  47.286 s
+[INFO] Finished at: 2026-06-12T06:30:21+02:00
+[INFO] ------------------------------------------------------------------------
+
+The producer runs through 5 phases with deliberate pauses — let it finish completely before stopping Terminal 1. 
+
+Conclusion:
+TUMBLING 10s — fixed non-overlapping windows:
+U-002 had 3 clicks all landing in the same 04:29:30 → 04:29:40 window → clickCount=3
+U-001 had 1 click in window 04:30:10 → 04:30:20 → clickCount=1
+Each click falls into exactly one window — no overlap
+
+HOPPING 30s/10s — overlapping windows:
+U-003 count=2 appears 3 times — same 2 clicks visible across 3 different overlapping windows
+That's the hopping behaviour — one event counted in multiple windows simultaneously
+This is why hopping is used for "rolling last 30s" stats updated every 10s
+
+SESSION gap=15s — activity-based variable windows:
+U-003 — 2 pages viewed, session started at 04:30:20 — closed after 15s inactivity
+U-002 — 1 page viewed in their own separate session
+Window size was variable — determined by activity, not a fixed clock
+
+The suppress() effect — notice tumbling windows only emitted once per window with the final count, not an intermediate update for every click. 
+Without suppress() you'd see a count of 1, then 2, then 3 as each click arrived. With it you only see the final 3 when the window closes.
+
+--------------------------------
+#3.4 State Stores - 
+Terminal 1:
+mvn exec:java -Dexec.mainClass="com.kafka.examples.streams.statestores.StateStoreExamples"
+C:\Users\Ajay\Downloads\kafka-examples\kafka-examples>mvn exec:java -Dexec.mainClass="com.kafka.examples.streams.statestores.StateStoreExamples"
+[INFO] Scanning for projects...
+[INFO]
+[INFO] -----------------< com.kafka.examples:kafka-examples >------------------
+[INFO] Building Kafka Enterprise Examples 1.0.0
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO]
+[INFO] --- exec:3.2.0:java (default-cli) @ kafka-examples ---
+06:35:10.540 [com.kafka.examples.streams.statestores.StateStoreExamples.main()] INFO  c.k.e.config.KafkaConfig - Γ£à Created topic: streams.stock.prices
+06:35:10.543 [com.kafka.examples.streams.statestores.StateStoreExamples.main()] INFO  c.k.e.config.KafkaConfig - Γ£à Created topic: streams.stock.alerts
+06:35:10.643 [com.kafka.examples.streams.statestores.StateStoreExamples.main()] ERROR o.a.k.s.p.i.StateDirectory - Failed to change permissions for the directory \tmp\kafka-streams-examples
+06:35:10.644 [com.kafka.examples.streams.statestores.StateStoreExamples.main()] ERROR o.a.k.s.p.i.StateDirectory - Failed to change permissions for the directory \tmp\kafka-streams-examples\state-store-examples
+06:35:11.017 [com.kafka.examples.streams.statestores.StateStoreExamples.main()] INFO  c.k.e.s.s.StateStoreExamples - Γ£à State store topology started. Run StockPriceProducer in another terminal.
+06:35:12.026 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples - ≡ƒôè Interactive query thread started (polls store every 5s)...
+06:35:17.049 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples - === Interactive Query: Stock Stats Store ===
+06:35:17.059 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   (store is empty ΓÇö waiting for price data)
+06:35:17.059 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples - ============================================
+06:35:22.071 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples - === Interactive Query: Stock Stats Store ===
+06:35:22.072 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   (store is empty ΓÇö waiting for price data)
+06:35:22.074 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples - ============================================
+06:35:27.095 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples - === Interactive Query: Stock Stats Store ===
+06:35:27.096 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   (store is empty ΓÇö waiting for price data)
+06:35:27.100 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples - ============================================
+06:35:32.114 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples - === Interactive Query: Stock Stats Store ===
+06:35:32.114 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   (store is empty ΓÇö waiting for price data)
+06:35:32.117 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples - ============================================
+06:35:33.209 [state-store-examples-48368dab-64b3-403c-bebb-93b36a5602e8-StreamThread-1] INFO  c.k.e.s.s.StateStoreExamples - ≡ƒôê [BMW] price=101.54 | min=101.54 | max=101.54 | ticks=1
+06:35:33.217 [state-store-examples-48368dab-64b3-403c-bebb-93b36a5602e8-StreamThread-1] INFO  c.k.e.s.s.StateStoreExamples - ≡ƒôê [SIE] price=171.03 | min=171.03 | max=171.03 | ticks=1
+06:35:33.218 [state-store-examples-48368dab-64b3-403c-bebb-93b36a5602e8-StreamThread-1] INFO  c.k.e.s.s.StateStoreExamples - ≡ƒôê [SAP] price=178.02 | min=178.02 | max=178.02 | ticks=1
+06:35:33.219 [state-store-examples-48368dab-64b3-403c-bebb-93b36a5602e8-StreamThread-1] INFO  c.k.e.s.s.StateStoreExamples - ≡ƒôê [ALV] price=246.91 | min=246.91 | max=246.91 | ticks=1
+06:35:34.644 [state-store-examples-48368dab-64b3-403c-bebb-93b36a5602e8-StreamThread-1] INFO  c.k.e.s.s.StateStoreExamples - ≡ƒôê [BMW] price=100.76 | min=100.76 | max=101.54 | ticks=2
+06:35:34.646 [state-store-examples-48368dab-64b3-403c-bebb-93b36a5602e8-StreamThread-1] INFO  c.k.e.s.s.StateStoreExamples - ≡ƒôê [SAP] price=176.96 | min=176.96 | max=178.02 | ticks=2
+06:35:34.651 [state-store-examples-48368dab-64b3-403c-bebb-93b36a5602e8-StreamThread-1] INFO  c.k.e.s.s.StateStoreExamples - ≡ƒôê [SIE] price=173.27 | min=171.03 | max=173.27 | ticks=2
+06:35:34.664 [state-store-examples-48368dab-64b3-403c-bebb-93b36a5602e8-StreamThread-1] INFO  c.k.e.s.s.StateStoreExamples - ≡ƒôê [ALV] price=246.04 | min=246.04 | max=246.91 | ticks=2
+06:35:36.177 [state-store-examples-48368dab-64b3-403c-bebb-93b36a5602e8-StreamThread-1] INFO  c.k.e.s.s.StateStoreExamples - ≡ƒôê [BMW] price=101.22 | min=100.76 | max=101.54 | ticks=3
+06:35:36.182 [state-store-examples-48368dab-64b3-403c-bebb-93b36a5602e8-StreamThread-1] INFO  c.k.e.s.s.StateStoreExamples - ≡ƒôê [SAP] price=175.37 | min=175.37 | max=178.02 | ticks=3
+06:35:36.190 [state-store-examples-48368dab-64b3-403c-bebb-93b36a5602e8-StreamThread-1] INFO  c.k.e.s.s.StateStoreExamples - ≡ƒôê [ALV] price=246.89 | min=246.04 | max=246.91 | ticks=3
+06:35:36.195 [state-store-examples-48368dab-64b3-403c-bebb-93b36a5602e8-StreamThread-1] INFO  c.k.e.s.s.StateStoreExamples - ≡ƒôê [SIE] price=174.58 | min=171.03 | max=174.58 | ticks=3
+06:35:37.125 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples - === Interactive Query: Stock Stats Store ===
+06:35:37.128 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   ALV | latest=246.89 | min=246.04 | max=246.91 | ticks=3
+06:35:37.135 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   BMW | latest=101.22 | min=100.76 | max=101.54 | ticks=3
+06:35:37.136 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   SAP | latest=175.37 | min=175.37 | max=178.02 | ticks=3
+06:35:37.138 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   SIE | latest=174.58 | min=171.03 | max=174.58 | ticks=3
+06:35:37.139 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples - ============================================
+06:35:37.716 [state-store-examples-48368dab-64b3-403c-bebb-93b36a5602e8-StreamThread-1] INFO  c.k.e.s.s.StateStoreExamples - ≡ƒôê [BMW] price=102.12 | min=100.76 | max=102.12 | ticks=4
+06:35:37.719 [state-store-examples-48368dab-64b3-403c-bebb-93b36a5602e8-StreamThread-1] INFO  c.k.e.s.s.StateStoreExamples - ≡ƒôê [SAP] price=174.32 | min=174.32 | max=178.02 | ticks=4
+06:35:37.729 [state-store-examples-48368dab-64b3-403c-bebb-93b36a5602e8-StreamThread-1] INFO  c.k.e.s.s.StateStoreExamples - ≡ƒôê [SIE] price=174.71 | min=171.03 | max=174.71 | ticks=4
+06:35:37.733 [state-store-examples-48368dab-64b3-403c-bebb-93b36a5602e8-StreamThread-1] INFO  c.k.e.s.s.StateStoreExamples - ≡ƒôê [ALV] price=244.27 | min=244.27 | max=246.91 | ticks=4
+06:35:39.251 [state-store-examples-48368dab-64b3-403c-bebb-93b36a5602e8-StreamThread-1] INFO  c.k.e.s.s.StateStoreExamples - ≡ƒôê [BMW] price=102.85 | min=100.76 | max=102.85 | ticks=5
+06:35:39.253 [state-store-examples-48368dab-64b3-403c-bebb-93b36a5602e8-StreamThread-1] INFO  c.k.e.s.s.StateStoreExamples - ≡ƒôê [SAP] price=176.47 | min=174.32 | max=178.02 | ticks=5
+06:35:39.259 [state-store-examples-48368dab-64b3-403c-bebb-93b36a5602e8-StreamThread-1] INFO  c.k.e.s.s.StateStoreExamples - ≡ƒôê [SIE] price=172.43 | min=171.03 | max=174.71 | ticks=5
+06:35:39.267 [state-store-examples-48368dab-64b3-403c-bebb-93b36a5602e8-StreamThread-1] INFO  c.k.e.s.s.StateStoreExamples - ≡ƒôê [ALV] price=245.26 | min=244.27 | max=246.91 | ticks=5
+06:35:40.783 [state-store-examples-48368dab-64b3-403c-bebb-93b36a5602e8-StreamThread-1] INFO  c.k.e.s.s.StateStoreExamples - ≡ƒôê [BMW] price=101.89 | min=100.76 | max=102.85 | ticks=6
+06:35:40.787 [state-store-examples-48368dab-64b3-403c-bebb-93b36a5602e8-StreamThread-1] INFO  c.k.e.s.s.StateStoreExamples - ≡ƒôê [SAP] price=176.36 | min=174.32 | max=178.02 | ticks=6
+06:35:40.799 [state-store-examples-48368dab-64b3-403c-bebb-93b36a5602e8-StreamThread-1] INFO  c.k.e.s.s.StateStoreExamples - ≡ƒôê [ALV] price=243.44 | min=243.44 | max=246.91 | ticks=6
+06:35:40.801 [state-store-examples-48368dab-64b3-403c-bebb-93b36a5602e8-StreamThread-1] INFO  c.k.e.s.s.StateStoreExamples - ≡ƒôê [SIE] price=173.29 | min=171.03 | max=174.71 | ticks=6
+06:35:42.152 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples - === Interactive Query: Stock Stats Store ===
+06:35:42.155 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   ALV | latest=243.44 | min=243.44 | max=246.91 | ticks=6
+06:35:42.160 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   BMW | latest=101.89 | min=100.76 | max=102.85 | ticks=6
+06:35:42.165 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   SAP | latest=176.36 | min=174.32 | max=178.02 | ticks=6
+06:35:42.168 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   SIE | latest=173.29 | min=171.03 | max=174.71 | ticks=6
+06:35:42.173 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples - ============================================
+06:35:42.313 [state-store-examples-48368dab-64b3-403c-bebb-93b36a5602e8-StreamThread-1] INFO  c.k.e.s.s.StateStoreExamples - ≡ƒôê [BMW] price=102.89 | min=100.76 | max=102.89 | ticks=7
+06:35:42.316 [state-store-examples-48368dab-64b3-403c-bebb-93b36a5602e8-StreamThread-1] INFO  c.k.e.s.s.StateStoreExamples - ≡ƒôê [SAP] price=176.99 | min=174.32 | max=178.02 | ticks=7
+06:35:42.325 [state-store-examples-48368dab-64b3-403c-bebb-93b36a5602e8-StreamThread-1] INFO  c.k.e.s.s.StateStoreExamples - ≡ƒôê [SIE] price=173.94 | min=171.03 | max=174.71 | ticks=7
+06:35:42.340 [state-store-examples-48368dab-64b3-403c-bebb-93b36a5602e8-StreamThread-1] INFO  c.k.e.s.s.StateStoreExamples - ≡ƒôê [ALV] price=239.83 | min=239.83 | max=246.91 | ticks=7
+06:35:43.853 [state-store-examples-48368dab-64b3-403c-bebb-93b36a5602e8-StreamThread-1] INFO  c.k.e.s.s.StateStoreExamples - ≡ƒôê [BMW] price=95.69 | min=95.69 | max=102.89 | ticks=8
+06:35:43.855 [state-store-examples-48368dab-64b3-403c-bebb-93b36a5602e8-StreamThread-1] WARN  c.k.e.s.s.StateStoreExamples - ≡ƒÜ¿ PRICE DROP ALERT: BMW dropped -6.09% (prev=101.89 now=95.69)
+06:35:43.869 [state-store-examples-48368dab-64b3-403c-bebb-93b36a5602e8-StreamThread-1] INFO  c.k.e.s.s.StateStoreExamples - ≡ƒôê [SAP] price=177.53 | min=174.32 | max=178.02 | ticks=8
+06:35:43.874 [state-store-examples-48368dab-64b3-403c-bebb-93b36a5602e8-StreamThread-1] INFO  c.k.e.s.s.StateStoreExamples - ≡ƒôê [SIE] price=176.00 | min=171.03 | max=176.00 | ticks=8
+06:35:43.884 [state-store-examples-48368dab-64b3-403c-bebb-93b36a5602e8-StreamThread-1] INFO  c.k.e.s.s.StateStoreExamples - ≡ƒôê [ALV] price=238.89 | min=238.89 | max=246.91 | ticks=8
+06:35:45.380 [state-store-examples-48368dab-64b3-403c-bebb-93b36a5602e8-StreamThread-1] INFO  c.k.e.s.s.StateStoreExamples - ≡ƒôê [BMW] price=96.83 | min=95.69 | max=102.89 | ticks=9
+06:35:45.383 [state-store-examples-48368dab-64b3-403c-bebb-93b36a5602e8-StreamThread-1] WARN  c.k.e.s.s.StateStoreExamples - ≡ƒÜ¿ PRICE DROP ALERT: BMW dropped -5.89% (prev=102.89 now=96.83)
+06:35:45.392 [state-store-examples-48368dab-64b3-403c-bebb-93b36a5602e8-StreamThread-1] INFO  c.k.e.s.s.StateStoreExamples - ≡ƒôê [SAP] price=178.51 | min=174.32 | max=178.51 | ticks=9
+06:35:45.401 [state-store-examples-48368dab-64b3-403c-bebb-93b36a5602e8-StreamThread-1] INFO  c.k.e.s.s.StateStoreExamples - ≡ƒôê [ALV] price=238.96 | min=238.89 | max=246.91 | ticks=9
+06:35:45.403 [state-store-examples-48368dab-64b3-403c-bebb-93b36a5602e8-StreamThread-1] INFO  c.k.e.s.s.StateStoreExamples - ≡ƒôê [SIE] price=174.72 | min=171.03 | max=176.00 | ticks=9
+06:35:46.913 [state-store-examples-48368dab-64b3-403c-bebb-93b36a5602e8-StreamThread-1] INFO  c.k.e.s.s.StateStoreExamples - ≡ƒôê [BMW] price=98.20 | min=95.69 | max=102.89 | ticks=10
+06:35:46.915 [state-store-examples-48368dab-64b3-403c-bebb-93b36a5602e8-StreamThread-1] INFO  c.k.e.s.s.StateStoreExamples - ≡ƒôê [SAP] price=180.11 | min=174.32 | max=180.11 | ticks=10
+06:35:46.926 [state-store-examples-48368dab-64b3-403c-bebb-93b36a5602e8-StreamThread-1] INFO  c.k.e.s.s.StateStoreExamples - ≡ƒôê [SIE] price=174.26 | min=171.03 | max=176.00 | ticks=10
+06:35:46.929 [state-store-examples-48368dab-64b3-403c-bebb-93b36a5602e8-StreamThread-1] INFO  c.k.e.s.s.StateStoreExamples - ≡ƒôê [ALV] price=241.05 | min=238.89 | max=246.91 | ticks=10
+06:35:47.187 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples - === Interactive Query: Stock Stats Store ===
+06:35:47.189 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   ALV | latest=241.05 | min=238.89 | max=246.91 | ticks=10
+06:35:47.192 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   BMW | latest=98.20 | min=95.69 | max=102.89 | ticks=10
+06:35:47.199 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   SAP | latest=180.11 | min=174.32 | max=180.11 | ticks=10
+06:35:47.202 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   SIE | latest=174.26 | min=171.03 | max=176.00 | ticks=10
+06:35:47.206 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples - ============================================
+06:35:52.214 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples - === Interactive Query: Stock Stats Store ===
+06:35:52.216 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   ALV | latest=241.05 | min=238.89 | max=246.91 | ticks=10
+06:35:52.219 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   BMW | latest=98.20 | min=95.69 | max=102.89 | ticks=10
+06:35:52.224 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   SAP | latest=180.11 | min=174.32 | max=180.11 | ticks=10
+06:35:52.227 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   SIE | latest=174.26 | min=171.03 | max=176.00 | ticks=10
+06:35:52.228 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples - ============================================
+06:35:57.233 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples - === Interactive Query: Stock Stats Store ===
+06:35:57.234 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   ALV | latest=241.05 | min=238.89 | max=246.91 | ticks=10
+06:35:57.235 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   BMW | latest=98.20 | min=95.69 | max=102.89 | ticks=10
+06:35:57.240 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   SAP | latest=180.11 | min=174.32 | max=180.11 | ticks=10
+06:35:57.241 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   SIE | latest=174.26 | min=171.03 | max=176.00 | ticks=10
+06:35:57.242 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples - ============================================
+06:36:02.253 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples - === Interactive Query: Stock Stats Store ===
+06:36:02.255 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   ALV | latest=241.05 | min=238.89 | max=246.91 | ticks=10
+06:36:02.259 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   BMW | latest=98.20 | min=95.69 | max=102.89 | ticks=10
+06:36:02.264 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   SAP | latest=180.11 | min=174.32 | max=180.11 | ticks=10
+06:36:02.266 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   SIE | latest=174.26 | min=171.03 | max=176.00 | ticks=10
+06:36:02.266 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples - ============================================
+06:36:07.274 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples - === Interactive Query: Stock Stats Store ===
+06:36:07.275 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   ALV | latest=241.05 | min=238.89 | max=246.91 | ticks=10
+06:36:07.278 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   BMW | latest=98.20 | min=95.69 | max=102.89 | ticks=10
+06:36:07.279 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   SAP | latest=180.11 | min=174.32 | max=180.11 | ticks=10
+06:36:07.284 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   SIE | latest=174.26 | min=171.03 | max=176.00 | ticks=10
+06:36:07.284 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples - ============================================
+06:36:12.299 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples - === Interactive Query: Stock Stats Store ===
+06:36:12.301 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   ALV | latest=241.05 | min=238.89 | max=246.91 | ticks=10
+06:36:12.305 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   BMW | latest=98.20 | min=95.69 | max=102.89 | ticks=10
+06:36:12.312 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   SAP | latest=180.11 | min=174.32 | max=180.11 | ticks=10
+06:36:12.313 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   SIE | latest=174.26 | min=171.03 | max=176.00 | ticks=10
+06:36:12.314 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples - ============================================
+06:36:17.333 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples - === Interactive Query: Stock Stats Store ===
+06:36:17.334 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   ALV | latest=241.05 | min=238.89 | max=246.91 | ticks=10
+06:36:17.335 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   BMW | latest=98.20 | min=95.69 | max=102.89 | ticks=10
+06:36:17.341 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   SAP | latest=180.11 | min=174.32 | max=180.11 | ticks=10
+06:36:17.342 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   SIE | latest=174.26 | min=171.03 | max=176.00 | ticks=10
+06:36:17.343 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples - ============================================
+06:36:22.348 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples - === Interactive Query: Stock Stats Store ===
+06:36:22.349 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   ALV | latest=241.05 | min=238.89 | max=246.91 | ticks=10
+06:36:22.350 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   BMW | latest=98.20 | min=95.69 | max=102.89 | ticks=10
+06:36:22.356 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   SAP | latest=180.11 | min=174.32 | max=180.11 | ticks=10
+06:36:22.358 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   SIE | latest=174.26 | min=171.03 | max=176.00 | ticks=10
+06:36:22.359 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples - ============================================
+06:36:27.371 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples - === Interactive Query: Stock Stats Store ===
+06:36:27.372 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   ALV | latest=241.05 | min=238.89 | max=246.91 | ticks=10
+06:36:27.379 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   BMW | latest=98.20 | min=95.69 | max=102.89 | ticks=10
+06:36:27.379 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   SAP | latest=180.11 | min=174.32 | max=180.11 | ticks=10
+06:36:27.380 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   SIE | latest=174.26 | min=171.03 | max=176.00 | ticks=10
+06:36:27.381 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples - ============================================
+06:36:32.391 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples - === Interactive Query: Stock Stats Store ===
+06:36:32.392 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   ALV | latest=241.05 | min=238.89 | max=246.91 | ticks=10
+06:36:32.393 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   BMW | latest=98.20 | min=95.69 | max=102.89 | ticks=10
+06:36:32.398 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   SAP | latest=180.11 | min=174.32 | max=180.11 | ticks=10
+06:36:32.399 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   SIE | latest=174.26 | min=171.03 | max=176.00 | ticks=10
+06:36:32.400 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples - ============================================
+06:36:37.410 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples - === Interactive Query: Stock Stats Store ===
+06:36:37.411 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   ALV | latest=241.05 | min=238.89 | max=246.91 | ticks=10
+06:36:37.413 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   BMW | latest=98.20 | min=95.69 | max=102.89 | ticks=10
+06:36:37.418 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   SAP | latest=180.11 | min=174.32 | max=180.11 | ticks=10
+06:36:37.419 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   SIE | latest=174.26 | min=171.03 | max=176.00 | ticks=10
+06:36:37.419 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples - ============================================
+06:36:42.430 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples - === Interactive Query: Stock Stats Store ===
+06:36:42.432 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   ALV | latest=241.05 | min=238.89 | max=246.91 | ticks=10
+06:36:42.434 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   BMW | latest=98.20 | min=95.69 | max=102.89 | ticks=10
+06:36:42.441 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   SAP | latest=180.11 | min=174.32 | max=180.11 | ticks=10
+06:36:42.442 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   SIE | latest=174.26 | min=171.03 | max=176.00 | ticks=10
+06:36:42.444 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples - ============================================
+06:36:47.459 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples - === Interactive Query: Stock Stats Store ===
+06:36:47.460 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   ALV | latest=241.05 | min=238.89 | max=246.91 | ticks=10
+06:36:47.463 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   BMW | latest=98.20 | min=95.69 | max=102.89 | ticks=10
+06:36:47.468 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   SAP | latest=180.11 | min=174.32 | max=180.11 | ticks=10
+06:36:47.469 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   SIE | latest=174.26 | min=171.03 | max=176.00 | ticks=10
+06:36:47.470 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples - ============================================
+06:36:52.487 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples - === Interactive Query: Stock Stats Store ===
+06:36:52.489 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   ALV | latest=241.05 | min=238.89 | max=246.91 | ticks=10
+06:36:52.493 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   BMW | latest=98.20 | min=95.69 | max=102.89 | ticks=10
+06:36:52.499 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   SAP | latest=180.11 | min=174.32 | max=180.11 | ticks=10
+06:36:52.501 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples -   SIE | latest=174.26 | min=171.03 | max=176.00 | ticks=10
+06:36:52.502 [virtual-41] INFO  c.k.e.s.s.StateStoreExamples - ============================================
+
+Terminal 2:
+mvn exec:java -Dexec.mainClass="com.kafka.examples.streams.statestores.StockPriceProducer"
+C:\Users\Ajay\Downloads\kafka-examples\kafka-examples>mvn exec:java -Dexec.mainClass="com.kafka.examples.streams.statestores.StockPriceProducer"
+[INFO] Scanning for projects...
+[INFO]
+[INFO] -----------------< com.kafka.examples:kafka-examples >------------------
+[INFO] Building Kafka Enterprise Examples 1.0.0
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO]
+[INFO] --- exec:3.2.0:java (default-cli) @ kafka-examples ---
+06:35:32.807 [com.kafka.examples.streams.statestores.StockPriceProducer.main()] INFO  c.k.e.config.KafkaConfig - Topics already exist, skipping creation
+06:35:32.889 [com.kafka.examples.streams.statestores.StockPriceProducer.main()] INFO  c.k.e.s.s.StockPriceProducer - Publishing 40 stock price ticks across 4 tickers...
+06:35:33.123 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.s.StockPriceProducer - ≡ƒôñ SIE price=171.03
+06:35:33.124 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.s.StockPriceProducer - ≡ƒôñ BMW price=101.54
+06:35:33.126 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.s.StockPriceProducer - ≡ƒôñ SAP price=178.02
+06:35:33.131 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.s.StockPriceProducer - ≡ƒôñ ALV price=246.91
+06:35:34.641 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.s.StockPriceProducer - ≡ƒôñ SIE price=173.27
+06:35:34.641 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.s.StockPriceProducer - ≡ƒôñ BMW price=100.76
+06:35:34.644 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.s.StockPriceProducer - ≡ƒôñ SAP price=176.96
+06:35:34.650 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.s.StockPriceProducer - ≡ƒôñ ALV price=246.04
+06:35:36.171 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.s.StockPriceProducer - ≡ƒôñ BMW price=101.22
+06:35:36.172 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.s.StockPriceProducer - ≡ƒôñ SAP price=175.37
+06:35:36.185 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.s.StockPriceProducer - ≡ƒôñ SIE price=174.58
+06:35:36.192 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.s.StockPriceProducer - ≡ƒôñ ALV price=246.89
+06:35:37.709 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.s.StockPriceProducer - ≡ƒôñ SIE price=174.71
+06:35:37.711 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.s.StockPriceProducer - ≡ƒôñ BMW price=102.12
+06:35:37.714 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.s.StockPriceProducer - ≡ƒôñ SAP price=174.32
+06:35:37.721 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.s.StockPriceProducer - ≡ƒôñ ALV price=244.27
+06:35:39.248 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.s.StockPriceProducer - ≡ƒôñ SIE price=172.43
+06:35:39.248 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.s.StockPriceProducer - ≡ƒôñ BMW price=102.85
+06:35:39.251 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.s.StockPriceProducer - ≡ƒôñ SAP price=176.47
+06:35:39.257 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.s.StockPriceProducer - ≡ƒôñ ALV price=245.26
+06:35:40.777 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.s.StockPriceProducer - ≡ƒôñ BMW price=101.89
+06:35:40.778 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.s.StockPriceProducer - ≡ƒôñ SAP price=176.36
+06:35:40.784 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.s.StockPriceProducer - ≡ƒôñ SIE price=173.29
+06:35:40.785 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.s.StockPriceProducer - ≡ƒôñ ALV price=243.44
+06:35:42.303 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.s.StockPriceProducer - ≡ƒôñ SIE price=173.94
+06:35:42.305 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.s.StockPriceProducer - ≡ƒôñ BMW price=102.89
+06:35:42.317 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.s.StockPriceProducer - ≡ƒôñ SAP price=176.99
+06:35:42.320 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.s.StockPriceProducer - ≡ƒôñ ALV price=239.83
+06:35:43.839 [com.kafka.examples.streams.statestores.StockPriceProducer.main()] WARN  c.k.e.s.s.StockPriceProducer - ≡ƒÆÑ Injecting BMW crash: 
+102.8920783743961 ΓåÆ 95.69
+06:35:43.850 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.s.StockPriceProducer - ≡ƒôñ SIE price=176.00
+06:35:43.851 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.s.StockPriceProducer - ≡ƒôñ BMW price=95.69
+06:35:43.851 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.s.StockPriceProducer - ≡ƒôñ SAP price=177.53
+06:35:43.854 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.s.StockPriceProducer - ≡ƒôñ ALV price=238.89
+06:35:45.373 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.s.StockPriceProducer - ≡ƒôñ BMW price=96.83
+06:35:45.374 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.s.StockPriceProducer - ≡ƒôñ SAP price=178.51
+06:35:45.386 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.s.StockPriceProducer - ≡ƒôñ SIE price=174.72
+06:35:45.387 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.s.StockPriceProducer - ≡ƒôñ ALV price=238.96
+06:35:46.909 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.s.StockPriceProducer - ≡ƒôñ SIE price=174.26
+06:35:46.910 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.s.StockPriceProducer - ≡ƒôñ BMW price=98.20
+06:35:46.913 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.s.StockPriceProducer - ≡ƒôñ SAP price=180.11
+06:35:46.924 [kafka-producer-network-thread | producer-1] INFO  c.k.e.s.s.StockPriceProducer - ≡ƒôñ ALV price=241.05
+06:35:48.430 [com.kafka.examples.streams.statestores.StockPriceProducer.main()] INFO  c.k.e.s.s.StockPriceProducer - Γ£à Done. Check 
+StateStoreExamples for interactive query output and alerts.
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  17.021 s
+[INFO] Finished at: 2026-06-12T06:35:48+02:00
+[INFO] ------------------------------------------------------------------------
+
+Let the producer finish all 10 rounds (~15 seconds). Watch Terminal 1 for the interactive query printing store contents every 5 seconds, 
+and specifically for the PRICE DROP ALERT on round 7 when BMW crashes 7%.
+
+Conclusion:
+All 4 tickers tracked perfectly across 10 price ticks each.
+Interactive Query output — reading directly from RocksDB state store:
+Ticker		Latest		Min	Max	Ticks
+ALV		241.05		238.89	246.91	10
+BMW		98.20		95.69	102.89	10
+SAP		180.11		174.32	180.11	10
+SIE		174.26		171.03	176.00	10
+
+Every ticker saw exactly 10 ticks — the custom aggregate() correctly maintained running min/max/latest across all of them without 
+touching any external database.
+
+In terminal 1:
+notice: PRICE DROP ALERT: BMW dropped -7.xx% (prev=... now=...)
+
+V1 Summary:
+Example				
+2A — Event-Driven Microservices
+2B — KStream-KTable Enrichment
+2C — Ingestion + DLT
+2D — Async Data Sharing
+3.1 — KStream Operations
+3.2 — All 3 Join Types
+3.3 — Windowing
+3.4 — State Stores + Interactive Queries

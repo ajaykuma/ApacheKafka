@@ -25,12 +25,12 @@ import java.util.concurrent.ExecutionException;
 
 public class ResetOffset {
     
-    public static final String CONSUMER_GROUP = "ApplGroup";
+    public static final String CONSUMER_GROUP = "group_id";
     public static final List<String> CONSUMER_GRP_LIST = Collections.singletonList(CONSUMER_GROUP);
     
 	public static void main(String[] args) throws ExecutionException, InterruptedException {
       Properties config = new Properties();
-      config.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, "c1:9092");
+      config.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092");
       AdminClient admin = AdminClient.create(config);
       
       // List consumer groups
@@ -50,7 +50,7 @@ public class ResetOffset {
       Map<TopicPartition, OffsetSpec> requestLatestOffsets = new HashMap<>();
       Map<TopicPartition, OffsetSpec> requestEarliestOffsets = new HashMap<>();
       Map<TopicPartition, OffsetSpec> requestOlderOffsets = new HashMap<>();
-      DateTime resetTo = new DateTime().minusHours(2);
+      DateTime resetTo = new DateTime().minusHours(3);
       // For all topics and partitions that have offsets committed by the group, get their latest offsets, 
       //earliest offsets and the offset for 2h ago. 
       //we are only populating the request for 2h old offsets, but not using them.

@@ -20,7 +20,7 @@ public class CheckandCreateTopic {
     public static final List<String> TOPIC_LIST = Collections.singletonList(TOPIC_NAME);
     public static final List<String> CONSUMER_GRP_LIST = Collections.singletonList(CONSUMER_GROUP);
     public static final int NUM_PARTITIONS = 3;
-    public static final short REP_FACTOR = 3;
+    public static final short REP_FACTOR = 1;
     
   public static void main(String[] args) throws ExecutionException, InterruptedException {
       Properties config = new Properties();

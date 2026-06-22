@@ -24,12 +24,12 @@ import java.util.concurrent.ExecutionException;
 
 public class GettingOffsets {
     
-    public static final String CONSUMER_GROUP = "ApplGroup";
+    public static final String CONSUMER_GROUP = "group_id";
     public static final List<String> CONSUMER_GRP_LIST = Collections.singletonList(CONSUMER_GROUP);
     
 	public static void main(String[] args) throws ExecutionException, InterruptedException {
       Properties config = new Properties();
-      config.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, "c1:9092");
+      config.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092");
       AdminClient admin = AdminClient.create(config);
       
       // List consumer groups

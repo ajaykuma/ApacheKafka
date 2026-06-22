@@ -1,0 +1,199 @@
+EOS examples:
+
+TransactionalProducer     → writes to two topics atomically (both commit or both abort)
+ExactlyOnceProcessor      → read-process-write with EOS (consume + produce in one transaction)
+TransactionVerifier       → proves no duplicates even after simulated crash
+EosTest                   → TopologyTestDriver test for EOS topology
+
+Step 1: from project v2 - mvn test
+--to confirm all previous 12 tests + 5 new EOS tests = 17 green
+
+-------------------------------------------
+Step 2:
+
+Terminal 1:
+mvn exec:java -Dexec.mainClass="com.kafka.examples.advanced.eos.TransactionalProducer"
+C:\Users\Ajay\Downloads\kafka-examples_v2\kafka-examples>mvn exec:java -Dexec.mainClass="com.kafka.examples.advanced.eos.TransactionalProducer"
+[INFO] Scanning for projects...
+[INFO]
+[INFO] -----------------< com.kafka.examples:kafka-examples >------------------
+[INFO] Building Kafka Enterprise Examples 1.0.0
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO]
+[INFO] --- exec:3.2.0:java (default-cli) @ kafka-examples ---
+13:02:00.949 [com.kafka.examples.advanced.eos.TransactionalProducer.main()] INFO  c.k.e.config.KafkaConfig - Γ£à Created topic: eos.orders.confirmed
+13:02:00.957 [com.kafka.examples.advanced.eos.TransactionalProducer.main()] INFO  c.k.e.config.KafkaConfig - Γ£à Created topic: eos.inventory.reserved
+13:02:00.965 [com.kafka.examples.advanced.eos.TransactionalProducer.main()] INFO  c.k.e.config.KafkaConfig - Γ£à Created topic: eos.payments.initiated
+13:02:02.329 [com.kafka.examples.advanced.eos.TransactionalProducer.main()] INFO  c.k.e.a.e.TransactionalProducer - Γ£à Transactions initialized for transactional.id=order-processor-txn-1
+13:02:02.329 [com.kafka.examples.advanced.eos.TransactionalProducer.main()] INFO  c.k.e.a.e.TransactionalProducer -
+--- Scenario 1: Successful atomic write across 3 topics ---
+13:02:02.333 [com.kafka.examples.advanced.eos.TransactionalProducer.main()] INFO  c.k.e.a.e.TransactionalProducer - [TXN] BEGIN transaction for orderId=ORD-TXN-001
+13:02:02.560 [com.kafka.examples.advanced.eos.TransactionalProducer.main()] INFO  c.k.e.a.e.TransactionalProducer - [TXN] Wrote to eos.orders.confirmed: orderId=ORD-TXN-001
+13:02:02.564 [com.kafka.examples.advanced.eos.TransactionalProducer.main()] INFO  c.k.e.a.e.TransactionalProducer - [TXN] Wrote to eos.inventory.reserved: orderId=ORD-TXN-001
+13:02:02.583 [com.kafka.examples.advanced.eos.TransactionalProducer.main()] INFO  c.k.e.a.e.TransactionalProducer - [TXN] Wrote to eos.payments.initiated: orderId=ORD-TXN-001
+13:02:02.650 [com.kafka.examples.advanced.eos.TransactionalProducer.main()] INFO  c.k.e.a.e.TransactionalProducer - [TXN] Γ£à COMMITTED transaction for orderId=ORD-TXN-001
+13:02:03.155 [com.kafka.examples.advanced.eos.TransactionalProducer.main()] INFO  c.k.e.a.e.TransactionalProducer -
+--- Scenario 2: Another successful transaction ---
+13:02:03.156 [com.kafka.examples.advanced.eos.TransactionalProducer.main()] INFO  c.k.e.a.e.TransactionalProducer - [TXN] BEGIN transaction for orderId=ORD-TXN-002
+13:02:03.165 [com.kafka.examples.advanced.eos.TransactionalProducer.main()] INFO  c.k.e.a.e.TransactionalProducer - [TXN] Wrote to eos.orders.confirmed: orderId=ORD-TXN-002
+13:02:03.167 [com.kafka.examples.advanced.eos.TransactionalProducer.main()] INFO  c.k.e.a.e.TransactionalProducer - [TXN] Wrote to eos.inventory.reserved: orderId=ORD-TXN-002
+13:02:03.168 [com.kafka.examples.advanced.eos.TransactionalProducer.main()] INFO  c.k.e.a.e.TransactionalProducer - [TXN] Wrote to eos.payments.initiated: orderId=ORD-TXN-002
+13:02:03.179 [com.kafka.examples.advanced.eos.TransactionalProducer.main()] INFO  c.k.e.a.e.TransactionalProducer - [TXN] Γ£à COMMITTED transaction for orderId=ORD-TXN-002
+13:02:03.689 [com.kafka.examples.advanced.eos.TransactionalProducer.main()] INFO  c.k.e.a.e.TransactionalProducer -
+--- Scenario 3: Simulated failure ΓåÆ transaction aborted ---
+13:02:03.690 [com.kafka.examples.advanced.eos.TransactionalProducer.main()] INFO  c.k.e.a.e.TransactionalProducer - [TXN] BEGIN transaction for orderId=ORD-TXN-003
+13:02:03.693 [com.kafka.examples.advanced.eos.TransactionalProducer.main()] INFO  c.k.e.a.e.TransactionalProducer - [TXN] Wrote to eos.orders.confirmed: orderId=ORD-TXN-003
+13:02:03.698 [com.kafka.examples.advanced.eos.TransactionalProducer.main()] ERROR c.k.e.a.e.TransactionalProducer - [TXN] Γ¥î ABORTING transaction for orderId=ORD-TXN-003: Simulated failure: invalid product PROD-INVALID
+13:02:03.702 [com.kafka.examples.advanced.eos.TransactionalProducer.main()] WARN  c.k.e.a.e.TransactionalProducer - [TXN] ≡ƒöä Transaction aborted. No records visible to read_committed consumers.
+13:02:04.204 [com.kafka.examples.advanced.eos.TransactionalProducer.main()] INFO  c.k.e.a.e.TransactionalProducer -
+--- Scenario 4: Recovery ΓÇö successful transaction after abort ---
+13:02:04.205 [com.kafka.examples.advanced.eos.TransactionalProducer.main()] INFO  c.k.e.a.e.TransactionalProducer - [TXN] BEGIN transaction for orderId=ORD-TXN-004
+13:02:04.212 [com.kafka.examples.advanced.eos.TransactionalProducer.main()] INFO  c.k.e.a.e.TransactionalProducer - [TXN] Wrote to eos.orders.confirmed: orderId=ORD-TXN-004
+13:02:04.217 [com.kafka.examples.advanced.eos.TransactionalProducer.main()] INFO  c.k.e.a.e.TransactionalProducer - [TXN] Wrote to eos.inventory.reserved: orderId=ORD-TXN-004
+13:02:04.219 [com.kafka.examples.advanced.eos.TransactionalProducer.main()] INFO  c.k.e.a.e.TransactionalProducer - [TXN] Wrote to eos.payments.initiated: orderId=ORD-TXN-004
+13:02:04.234 [com.kafka.examples.advanced.eos.TransactionalProducer.main()] INFO  c.k.e.a.e.TransactionalProducer - [TXN] Γ£à COMMITTED transaction for orderId=ORD-TXN-004
+13:02:04.234 [com.kafka.examples.advanced.eos.TransactionalProducer.main()] INFO  c.k.e.a.e.TransactionalProducer -
+Γ£à All transactions complete.
+13:02:04.235 [com.kafka.examples.advanced.eos.TransactionalProducer.main()] INFO  c.k.e.a.e.TransactionalProducer -    Run TransactionVerifier to confirm exactly 3 orders landed (not 4).
+13:02:04.236 [com.kafka.examples.advanced.eos.TransactionalProducer.main()] INFO  c.k.e.a.e.TransactionalProducer -    ORD-TXN-003 was aborted and should be invisible to read_committed consumers.
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  5.350 s
+[INFO] Finished at: 2026-06-13T13:02:04+02:00
+[INFO] ------------------------------------------------------------------------
+
+watch for 
+[TXN] COMMITTED transaction for orderId=ORD-TXN-001
+[TXN] COMMITTED transaction for orderId=ORD-TXN-002
+[TXN] ABORTING transaction for orderId=ORD-TXN-003
+[TXN] Transaction aborted. No records visible to read_committed consumers.
+[TXN] COMMITTED transaction for orderId=ORD-TXN-004
+
+Terminal 2
+-- Run the verifier
+mvn exec:java -Dexec.mainClass="com.kafka.examples.advanced.eos.TransactionVerifier"
+
+C:\Users\Ajay\Downloads\kafka-examples_v2\kafka-examples>mvn exec:java -Dexec.mainClass="com.kafka.examples.advanced.eos.TransactionVerifier"
+[INFO] Scanning for projects...
+[INFO]
+[INFO] -----------------< com.kafka.examples:kafka-examples >------------------
+[INFO] Building Kafka Enterprise Examples 1.0.0
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO]
+[INFO] --- exec:3.2.0:java (default-cli) @ kafka-examples ---
+13:03:16.415 [com.kafka.examples.advanced.eos.TransactionVerifier.main()] INFO  c.k.e.a.e.TransactionVerifier - === Transaction Verification ===
+13:03:16.418 [com.kafka.examples.advanced.eos.TransactionVerifier.main()] INFO  c.k.e.a.e.TransactionVerifier - Running two consumers on eos.orders.confirmed with different isolation levels...
+
+13:03:17.595 [com.kafka.examples.advanced.eos.TransactionVerifier.main()] INFO  c.k.e.a.e.TransactionVerifier -   [read_committed] orderId=ORD-TXN-002 partition=0 offset=0
+13:03:17.596 [com.kafka.examples.advanced.eos.TransactionVerifier.main()] INFO  c.k.e.a.e.TransactionVerifier -   [read_committed] orderId=ORD-TXN-004 partition=0 offset=2
+13:03:17.598 [com.kafka.examples.advanced.eos.TransactionVerifier.main()] INFO  c.k.e.a.e.TransactionVerifier -   [read_committed] orderId=ORD-TXN-001 partition=1 offset=0
+13:03:20.697 [com.kafka.examples.advanced.eos.TransactionVerifier.main()] INFO  c.k.e.a.e.TransactionVerifier -   ΓåÆ [read_committed] total: 3 records
+
+13:03:20.743 [com.kafka.examples.advanced.eos.TransactionVerifier.main()] INFO  c.k.e.a.e.TransactionVerifier -   [read_uncommitted] orderId=ORD-TXN-002 partition=0 offset=0
+13:03:20.744 [com.kafka.examples.advanced.eos.TransactionVerifier.main()] INFO  c.k.e.a.e.TransactionVerifier -   [read_uncommitted] orderId=ORD-TXN-004 partition=0 offset=2
+13:03:20.749 [com.kafka.examples.advanced.eos.TransactionVerifier.main()] INFO  c.k.e.a.e.TransactionVerifier -   [read_uncommitted] orderId=ORD-TXN-001 partition=1 offset=0
+13:03:20.756 [com.kafka.examples.advanced.eos.TransactionVerifier.main()] INFO  c.k.e.a.e.TransactionVerifier -   [read_uncommitted] orderId=ORD-TXN-003 partition=2 offset=0
+13:03:23.836 [com.kafka.examples.advanced.eos.TransactionVerifier.main()] INFO  c.k.e.a.e.TransactionVerifier -   ΓåÆ [read_uncommitted] total: 4 records
+
+13:03:23.837 [com.kafka.examples.advanced.eos.TransactionVerifier.main()] INFO  c.k.e.a.e.TransactionVerifier -
+=== Results ===
+13:03:23.840 [com.kafka.examples.advanced.eos.TransactionVerifier.main()] INFO  c.k.e.a.e.TransactionVerifier -   read_committed   saw: 3 records
+13:03:23.841 [com.kafka.examples.advanced.eos.TransactionVerifier.main()] INFO  c.k.e.a.e.TransactionVerifier -   read_uncommitted saw: 4 records
+13:03:23.846 [com.kafka.examples.advanced.eos.TransactionVerifier.main()] INFO  c.k.e.a.e.TransactionVerifier -   Aborted records hidden from read_committed: 1
+13:03:23.847 [com.kafka.examples.advanced.eos.TransactionVerifier.main()] INFO  c.k.e.a.e.TransactionVerifier -
+Γ£à EOS VERIFIED: 1 aborted record(s) invisible to read_committed consumers
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  8.231 s
+[INFO] Finished at: 2026-06-13T13:03:23+02:00
+[INFO] ------------------------------------------------------------------------
+
+Conclusion:
+You should see read_uncommitted=4, read_committed=3. That one record difference is the entire EOS guarantee — ORD-TXN-003 
+physically exists on the broker but is completely invisible to any consumer using isolation.level=read_committed.
+
+Output:
+--demonstration of exactly-once semantics
+read_committed — 3 records:
+ORD-TXN-001  partition=1  offset=0 
+ORD-TXN-002  partition=0  offset=0 
+ORD-TXN-004  partition=0  offset=2 
+read_uncommitted — 4 records:
+ORD-TXN-001  partition=1  offset=0 
+ORD-TXN-002  partition=0  offset=0 
+ORD-TXN-003  partition=2  offset=0  ← this is the aborted record
+ORD-TXN-004  partition=0  offset=2 
+
+Three things worth noting:
+1. ORD-TXN-003 physically exists on the broker — it's on partition=2 offset=0. The data was written. But read_committed consumers 
+cannot see it because the transaction was aborted. It's not deleted, it's just fenced off.
+2. The offset gap on partition=0 — offsets go 0, then 2. Offset=1 is missing because that's where ORD-TXN-003's transaction marker sits. 
+Kafka uses internal markers to track transaction boundaries, which consume offset slots.
+3. This is why isolation.level matters in production — if any of your consumers are reading topics written by transactional producers and 
+you don't set read_committed, you risk processing aborted records. Your default is read_uncommitted.
+
+-------------------------------------------------------------------------
+
+
+#The consume-transform-produce processor
+--This reads the 3 committed orders and commits offsets atomically inside each transaction via sendOffsetsToTransaction.
+Terminal 1
+mvn exec:java -Dexec.mainClass="com.kafka.examples.advanced.eos.ExactlyOnceProcessor"
+C:\Users\Ajay\Downloads\kafka-examples_v2\kafka-examples>mvn exec:java -Dexec.mainClass="com.kafka.examples.advanced.eos.ExactlyOnceProcessor"
+[INFO] Scanning for projects...
+[INFO]
+[INFO] -----------------< com.kafka.examples:kafka-examples >------------------
+[INFO] Building Kafka Enterprise Examples 1.0.0
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO]
+[INFO] --- exec:3.2.0:java (default-cli) @ kafka-examples ---
+13:05:07.298 [com.kafka.examples.advanced.eos.ExactlyOnceProcessor.main()] INFO  c.k.e.config.KafkaConfig - Γ£à Created topic: eos.orders.processed
+13:05:07.565 [com.kafka.examples.advanced.eos.ExactlyOnceProcessor.main()] INFO  c.k.e.a.e.ExactlyOnceProcessor - Γ£à EOS processor started. transactional.id=order-processor-eos-b935e9dc
+13:05:07.566 [com.kafka.examples.advanced.eos.ExactlyOnceProcessor.main()] INFO  c.k.e.a.e.ExactlyOnceProcessor -    Reading from: eos.orders.confirmed  Writing to: eos.orders.processed
+13:05:07.571 [com.kafka.examples.advanced.eos.ExactlyOnceProcessor.main()] INFO  c.k.e.a.e.ExactlyOnceProcessor -    isolation.level=read_committed ΓÇö aborted records are invisible
+13:05:07.915 [com.kafka.examples.advanced.eos.ExactlyOnceProcessor.main()] INFO  c.k.e.a.e.ExactlyOnceProcessor - [EOS] Processing orderId=ORD-TXN-002 partition=0 offset=0
+13:05:08.109 [com.kafka.examples.advanced.eos.ExactlyOnceProcessor.main()] INFO  c.k.e.a.e.ExactlyOnceProcessor - [EOS] Γ£à COMMITTED: orderId=ORD-TXN-002 offset=0 atomically advanced
+13:05:08.110 [com.kafka.examples.advanced.eos.ExactlyOnceProcessor.main()] INFO  c.k.e.a.e.ExactlyOnceProcessor - [EOS] Processing orderId=ORD-TXN-004 partition=0 offset=2
+13:05:08.273 [com.kafka.examples.advanced.eos.ExactlyOnceProcessor.main()] INFO  c.k.e.a.e.ExactlyOnceProcessor - [EOS] Γ£à COMMITTED: orderId=ORD-TXN-004 offset=2 atomically advanced
+13:05:08.275 [com.kafka.examples.advanced.eos.ExactlyOnceProcessor.main()] INFO  c.k.e.a.e.ExactlyOnceProcessor - [EOS] Processing orderId=ORD-TXN-001 partition=1 offset=0
+13:05:08.294 [com.kafka.examples.advanced.eos.ExactlyOnceProcessor.main()] INFO  c.k.e.a.e.ExactlyOnceProcessor - [EOS] Γ£à COMMITTED: orderId=ORD-TXN-001 offset=0 atomically advanced
+13:05:08.295 [com.kafka.examples.advanced.eos.ExactlyOnceProcessor.main()] INFO  c.k.e.a.e.ExactlyOnceProcessor -
+Γ£à EOS processing complete. 3 records processed exactly once.
+13:05:08.298 [com.kafka.examples.advanced.eos.ExactlyOnceProcessor.main()] INFO  c.k.e.a.e.ExactlyOnceProcessor -    Check eos.orders.processed for the output.
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  2.528 s
+[INFO] Finished at: 2026-06-13T13:05:08+02:00
+[INFO] ------------------------------------------------------------------------
+
+Conclusion:
+What just happened in the processor:
+
+Read ORD-TXN-002 at partition=0 offset=0 → processed → offset atomically committed to 1
+Read ORD-TXN-004 at partition=0 offset=2 → processed → offset atomically committed to 3
+Read ORD-TXN-001 at partition=1 offset=0 → processed → offset atomically committed to 1
+ORD-TXN-003 was never seen — isolation.level=read_committed filtered it out before it even reached the poll loop
+
+Notice offset=2 for ORD-TXN-004 on partition=0 — offset=1 was consumed by the abort marker for ORD-TXN-003. 
+The processor jumped straight from 0 to 2 without any special handling — Kafka managed the gap transparently.
+
+EOS Summary:
+Concept							Proven
+Atomic multi-topic writes			3 topics written together or not at all
+Abort rolls back all writes			ORD-TXN-003 invisible to read_committed
+read_committed vs read_uncommitted		3 vs 4 records — difference is the guarantee
+sendOffsetsToTransaction			Offset + output commit are one atomic operation
+Recovery after abort				ORD-TXN-004 committed cleanly after ORD-TXN-003 failed
+
+========================================================
+#Next up: Schema Evolution with Avro + Schema Registry.
+This one needs the Confluent Schema Registry running locally alongside Kafka. Do you have it running, or do you need setup steps first?
+[Needs extra setup]
+
+#
