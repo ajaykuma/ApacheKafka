@@ -1,0 +1,49 @@
+
+## Using ksqldb when using WordCountDemoextended.java
+# Download from:
+https://ksqldb.io/quickstart.html
+
+# or use Docker (easiest on Windows):
+docker run -p 8088:8088 ^
+    -e KSQL_BOOTSTRAP_SERVERS=host.docker.internal:9092 ^
+    -e KSQL_KSQL_SERVICE_ID=ksql_service ^
+    confluentinc/ksqldb-server:latest
+    
+--Connect ksqlDB CLI
+docker run --rm -it confluentinc/ksqldb-cli:latest ksql http://host.docker.internal:8088
+
+--Create a stream over your input topic
+CREATE STREAM word_input (
+    word VARCHAR
+) WITH (
+    KAFKA_TOPIC='streams-plaintext-input',
+    VALUE_FORMAT='KAFKA'
+);
+
+--Create a windowed table (to mirror topology)
+CREATE TABLE word_counts AS
+    SELECT word,
+           COUNT(*) AS count
+    FROM word_input
+    WINDOW TUMBLING (SIZE 1 MINUTE)
+    GROUP BY word
+    EMIT CHANGES;
+    
+----query it 
+--Live streaming query
+SELECT * FROM word_counts EMIT CHANGES;
+
+--Point-in-time snapshot
+SELECT * FROM word_counts WHERE word = 'hello';   
+
+#Note:
+queryStore() > queries the local RocksDB state store directly from within our Java app
+our Java App > RocksDB (local disk) : print to console
+
+ksqlDB: reads directly from the Kafka output topic
+our Java App > streams-wordcount-output topic > ksqlDB reads it
+
+
+
+
+
