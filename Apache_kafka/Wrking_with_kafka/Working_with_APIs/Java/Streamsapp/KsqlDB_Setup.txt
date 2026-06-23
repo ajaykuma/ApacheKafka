@@ -1,0 +1,228 @@
+#Install prerequisites:
+
+sudo apt update
+sudo apt install -y software-properties-common curl gnupg
+
+#Add Confluent's signing key and the ksqlDB repo:
+curl -sq http://ksqldb-packages.s3.amazonaws.com/deb/0.29/archive.key | sudo apt-key add -
+sudo add-apt-repository "deb http://ksqldb-packages.s3.amazonaws.com/deb/0.29 stable main"
+sudo apt update
+
+#apt-key is deprecated on newer Ubuntu (22.04+). If you get a warning or it's unavailable, use this instead:
+curl -sq http://ksqldb-packages.s3.amazonaws.com/deb/0.29/archive.key | gpg --dearmor | sudo tee /usr/share/keyrings/ksqldb.gpg > /dev/null
+echo "deb [signed-by=/usr/share/keyrings/ksqldb.gpg] http://ksqldb-packages.s3.amazonaws.com/deb/0.29 stable main" | sudo tee /etc/apt/sources.list.d/ksqldb.list
+sudo apt update
+
+#Install
+sudo apt install -y confluent-ksqldb
+
+#Edit /etc/ksqldb/ksql-server.properties and set
+bootstrap.servers=localhost:9092
+listeners=http://0.0.0.0:8088
+
+--check & change permissions 
+sudo mkdir -p /var/lib/kafka-streams
+sudo chown -R hdu:hdu /var/lib/kafka-streams
+
+sudo mkdir -p /var/log/ksqldb
+sudo chown -R hdu:hdu /var/log/ksqldb
+
+#Start ksqlDB server
+--The server's UserFunctionLoader calls System.setSecurityManager() when loading UDFs at startup
+--LOG_DIR=/var/log/ksqldbNeeded a writable path for server logs
+sudo -u hdu env LOG_DIR=/var/log/ksqldb KSQL_OPTS="-Djava.security.manager=allow" ksql-server-start /etc/ksqldb/ksql-server.properties
+
+#--check
+hdu@m1:~$ ksql http://localhost:8088
+log4j:ERROR setFile(null,false) call failed.
+java.io.FileNotFoundException: /usr/logs/ksql-cli/cli-260623-064824.log (No such file or directory)
+        at java.base/java.io.FileOutputStream.open0(Native Method)
+...
+        at org.slf4j.LoggerFactory.getLogger(LoggerFactory.java:362)
+        at org.slf4j.LoggerFactory.getLogger(LoggerFactory.java:388)
+        at io.confluent.ksql.Ksql.<clinit>(Ksql.java:40)
+
+                  ===========================================
+                  =       _              _ ____  ____       =
+                  =      | | _____  __ _| |  _ \| __ )      =
+                  =      | |/ / __|/ _` | | | | |  _ \      =
+                  =      |   <\__ \ (_| | | |_| | |_) |     =
+                  =      |_|\_\___/\__, |_|____/|____/      =
+                  =                   |_|                   =
+                  =        The Database purpose-built       =
+                  =        for stream processing apps       =
+                  ===========================================
+
+Copyright 2017-2022 Confluent Inc.
+
+CLI v0.29.0, Server v0.29.0 located at http://localhost:8088
+Server Status: RUNNING
+
+Having trouble? Type 'help' (case-insensitive) for a rundown of how things work!
+
+<optionally we can>
+export LOG_DIR=/var/log/ksqldb 
+& then 
+ksql http://localhost:8088
+
+or
+
+LOG_DIR=/var/log/ksqldb ksql http://localhost:8088
+
+---------------------------------------------
+#Working
+
+ksql>
+ksql> show topics;
+
+ Kafka Topic                 | Partitions | Partition Replicas
+---------------------------------------------------------------
+ default_ksql_processing_log | 1          | 1
+---------------------------------------------------------------
+
+--raw peek without declaring a schema
+ksql> PRINT 'streams-wordcount-output' FROM BEGINNING;
+
+on Kafka: sending some data
+$KAFKA_HOME/bin/kafka-console-producer.sh --bootstrap-server localhost:9092 --topic streams-plaintext-input
+>
+
+--run streamapp
+(mvn exec:java -Dexec.mainClass="com.example.kafkastreams.streamsapp.WordCountDemoextended")
+
+--declare a ksqldb stream over the input topic
+CREATE STREAM input_text (
+    LINE VARCHAR
+) WITH (
+    KAFKA_TOPIC='streams-plaintext-input',
+    VALUE_FORMAT='KAFKA'
+);
+
+--Declare a ksqlDB TABLE over the output topic
+our app writes key = word (String), value = count (Long, via Serdes.Long()). 
+ksqlDB's KAFKA format supports raw primitive types directly — no Avro/JSON needed — so we can map it 1:1
+CREATE TABLE word_counts (
+    WORD VARCHAR PRIMARY KEY,
+    WORD_COUNT BIGINT
+) WITH (
+    KAFKA_TOPIC='streams-wordcount-output',
+    VALUE_FORMAT='KAFKA',
+    KEY_FORMAT='KAFKA'
+);
+
+Note**A TABLE (not STREAM) here since the topic is a changelog — 
+each new record for a word is the latest total, not an independent event.
+
+--push query
+SELECT * FROM word_counts EMIT CHANGES;
+
+(if it shows errors:
+KAFKA uses serialization format — it only knows how to encode a single value, 
+not a multi-field record. our table only has one real value column (WORD_COUNT), But SELECT * on a table implicitly 
+adds ksqlDB's pseudocolumns ROWPARTITION and ROWOFFSET to the result. 
+Once those are added, the result becomes a multi-field schema, and KAFKA format can't serialize that.)
+
+--so this wouldnt work too.
+ksql> SELECT WORD, WORD_COUNT FROM word_counts EMIT CHANGES;
+
+when we push-query a source table (one declared directly over an existing topic via plain CREATE TABLE ... 
+WITH (KAFKA_TOPIC=...)), ksqlDB internally tracks ROWPARTITION/ROWOFFSET as part of how it processes 
+the underlying changelog for that table — regardless of what we put in your SELECT clause. 
+That metadata gets folded into the schema that has to be serialized, and KAFKA format can only serialize a single bare field. 
+So any push query directly against this raw word_counts table will hit the same wall, no matter how we write the SELECT.
+CTAS inherits the source table's value format (KAFKA) by default unless we explicitly override.
+
+--Query current state (a snapshot like a normal database)
+SELECT * FROM word_counts WHERE WORD = 'hello';
+
+(if error:
+A table declared with a plain CREATE TABLE ... WITH (KAFKA_TOPIC=...) (a source table) is  a logical schema over an existing topic
+ — ksqlDB doesn't build its own materialized state store for it. 
+Pull queries (SELECT ... WHERE ... without EMIT CHANGES) need that materialized store to look up by key, 
+so they only work against tables that ksqlDB itself materializes — i.e., ones built via CREATE TABLE ... AS SELECT (CTAS).)
+
+--derive a materialized table
+CREATE TABLE queryable_word_counts AS
+  SELECT WORD, WORD_COUNT
+  FROM word_counts;
+
+--pull query
+SELECT * FROM queryable_word_counts WHERE WORD = 'hello';
+
+--Optional
+ Recreate the same logic purely in ksqlDB
+CREATE TABLE word_counts_ksql AS
+  SELECT EXPLODE(SPLIT(LINE, ' ')) AS WORD, COUNT(*) AS WORD_COUNT
+  FROM input_text
+  GROUP BY EXPLODE(SPLIT(LINE, ' '));
+
+Compare word_counts against word_counts_ksql for the same word
+
+-----------------------------------
+
+or changes in Appl
+*shown below
+----------------------------------
+
+--Drop past topics and tables.
+DROP TABLE word_counts;
+
+CREATE TABLE word_counts (
+    WORD VARCHAR PRIMARY KEY,
+    WORD_COUNT BIGINT
+) WITH (
+    KAFKA_TOPIC='streams-wordcount-output',
+    VALUE_FORMAT='JSON',
+    KEY_FORMAT='KAFKA'
+);
+
+try pull and push queries:
+CREATE TABLE queryable_word_counts AS
+  SELECT WORD, WORD_COUNT
+  FROM word_counts;
+
+SELECT WORD, WORD_COUNT FROM queryable_word_counts EMIT CHANGES;
+SELECT * FROM queryable_word_counts WHERE WORD = 'hello';
+
+
+#Changes in Appl
+--switch app's sink to JSON
+--Change the output value serde from raw Serdes.Long() to a small JSON-encoded object (so ksqlDB can map a named column onto it):
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.kafka.common.serialization.Serde;
+import org.apache.kafka.common.serialization.Serdes;
+import org.apache.kafka.common.serialization.Serializer;
+import org.apache.kafka.common.serialization.Deserializer;
+import java.util.Collections;
+import java.util.Map;
+
+static Serde<Long> jsonLongValueSerde() {
+    ObjectMapper mapper = new ObjectMapper();
+
+    Serializer<Long> serializer = (topic, data) -> {
+        try {
+            Map<String, Long> wrapped = Collections.singletonMap("WORD_COUNT", data);
+            return mapper.writeValueAsBytes(wrapped);
+        } catch (Exception e) { throw new RuntimeException(e); }
+    };
+
+    Deserializer<Long> deserializer = (topic, bytes) -> {
+        try {
+            Map<String, Object> m = mapper.readValue(bytes, Map.class);
+            return ((Number) m.get("WORD_COUNT")).longValue();
+        } catch (Exception e) { throw new RuntimeException(e); }
+    };
+
+    return Serdes.serdeFrom(serializer, deserializer);
+}
+
+--update the sink
+counts.toStream()
+    .to(OUTPUT_TOPIC, Produced.with(Serdes.String(), jsonLongValueSerde()));
+
+
+
+
+
+
