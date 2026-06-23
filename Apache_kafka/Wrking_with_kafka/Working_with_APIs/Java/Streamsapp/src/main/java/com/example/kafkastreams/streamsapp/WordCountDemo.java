@@ -58,29 +58,30 @@ public final class WordCountDemo {
 
         // Updated windowing API for Kafka Streams 3.x
         Duration windowSize    = Duration.ofMinutes(1);
-        Duration advanceSize   = Duration.ofMinutes(1);
+        //Duration advanceSize   = Duration.ofMinutes(1);
+        Duration advanceSize = Duration.ofSeconds(30);
         Duration inactivityGap = Duration.ofMinutes(5);
         Duration gracePeriod   = Duration.ofMillis(500);
         Duration timeDifference = Duration.ofSeconds(2);
 
         // New API: ofSizeWithNoGrace() or ofSizeAndGrace()
-        TimeWindows tumblingWindow = TimeWindows.ofSizeWithNoGrace(windowSize);
+        //TimeWindows tumblingWindow = TimeWindows.ofSizeWithNoGrace(windowSize);
         //hopping window definition — advanceBy should be less than windowSize for it to actually "hop".
-        //TimeWindows hoppingWindow  = TimeWindows.ofSizeAndGrace(windowSize, gracePeriod).advanceBy(advanceSize);
+        TimeWindows hoppingWindow  = TimeWindows.ofSizeAndGrace(windowSize, gracePeriod).advanceBy(advanceSize);
 
         final KTable<Windowed<String>, Long> counts = source
             .flatMapValues(value -> Arrays.asList(value.toLowerCase(Locale.getDefault()).split("\\W+")))
             .groupBy((key, value) -> value)
-            .windowedBy(tumblingWindow)
+            //.windowedBy(tumblingWindow)
             // Uncomment one windowing strategy as needed:
-            //.windowedBy(hoppingWindow)
+            .windowedBy(hoppingWindow)
             //.windowedBy(SessionWindows.ofInactivityGapWithNoGrace(inactivityGap))
             //.windowedBy(SlidingWindows.ofTimeDifferenceAndGrace(timeDifference, gracePeriod))
-            .count();
+            //.count();
             //when using suppress uncomment this
-            //.count(Materialized.<String, Long, WindowStore<Bytes, byte[]>>as("word-count-store")
-            //    .withKeySerde(Serdes.String())
-            //    .withValueSerde(Serdes.Long()));
+            .count(Materialized.<String, Long, WindowStore<Bytes, byte[]>>as("word-count-store")
+                .withKeySerde(Serdes.String())
+                .withValueSerde(Serdes.Long()));
         
         /*When no windowing*
          & Consumer: StringDeserializer for key * /
