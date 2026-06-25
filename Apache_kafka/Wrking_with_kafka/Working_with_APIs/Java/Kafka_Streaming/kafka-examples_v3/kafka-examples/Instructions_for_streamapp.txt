@@ -1,0 +1,14 @@
+Option1:
+#import streamsapp as maven project and edit the broker config
+#maven install
+#take the jar file and place it in ur node of the cluster
+
+#take the jar file and place it in ur node of the cluster
+#follow the instructions in E:\GitContent\ApacheKafka\ApacheKafka\Apache_kafka\Wrking_with_kafka\Working_with_cluster >
+ 'Testing_n_working_cluster3_strm.txt' for standalone/cluster
+
+Option2:
+Just take the jar file 'streamsapp-0.0.n1-SNAPSHOT.jar' from github and use it
+this is edited to connect to n1 as broker.
+--if broker is on different host, we need to create the jar again
+

@@ -416,7 +416,209 @@ GROUP                     TOPIC                      PARTITION  CURRENT-OFFSET  
 enrichment-verifier-group enrichment.orders.enriched 2          0               0               0               -               -               -
 enrichment-verifier-group enrichment.orders.enriched 0          0               0               0               -               -               -
 enrichment-verifier-group enrichment.orders.enriched 1          3               3               0               -               -               -
-               
+
+##KsqlDB & KTable
+--to check version
+curl -s http://localhost:8088/info | python3 -m json.tool
+{
+    "KsqlServerInfo": {
+        "version": "0.29.0",
+        "kafkaClusterId": "WjITTPOYQIaNzF-mbuVdTw",
+        "ksqlServiceId": "default_",
+        "serverStatus": "RUNNING"
+    }
+}
+
+CREATE TABLE customer_profiles (
+    customerId VARCHAR PRIMARY KEY,
+    name VARCHAR,
+    email VARCHAR,
+    tier VARCHAR,
+    preferredRegion VARCHAR
+) WITH (
+    KAFKA_TOPIC = 'enrichment.customer-profiles',
+    VALUE_FORMAT = 'JSON',
+    PARTITIONS = 3
+);
+
+SELECT * FROM customer_profiles; //(but customer_profiles is not queryable)
+--to derive a queryable table
+CREATE TABLE QUERYABLE_CUSTOMER_PROFILES AS SELECT * FROM CUSTOMER_PROFILES;
+ 
+--then
+ksql> select * from queryable_customer_profiles;
++---------------------+---------------------+---------------------+---------------------+---------------------+
+|CUSTOMERID           |NAME                 |EMAIL                |TIER                 |PREFERREDREGION      |
++---------------------+---------------------+---------------------+---------------------+---------------------+
+|CUST-100             |Alice Schmidt        |alice@example.com    |GOLD                 |EU-WEST              |
+|CUST-101             |Bob Meier            |bob@example.com      |SILVER               |EU-CENTRAL           |
+|CUST-102             |Carol Bauer          |carol@example.com    |GOLD                 |EU-NORTH             |
+|CUST-103             |David Klein          |david@example.com    |STANDARD             |EU-EAST              |
+Query terminated
+
+ksql> select * from queryable_customer_profiles emit changes;
++---------------------+---------------------+---------------------+---------------------+---------------------+
+|CUSTOMERID           |NAME                 |EMAIL                |TIER                 |PREFERREDREGION      |
++---------------------+---------------------+---------------------+---------------------+---------------------+
+|CUST-100             |Alice Schmidt        |alice@example.com    |GOLD                 |EU-WEST              |
+|CUST-101             |Bob Meier            |bob@example.com      |SILVER               |EU-CENTRAL           |
+|CUST-102             |Carol Bauer          |carol@example.com    |GOLD                 |EU-NORTH             |
+|CUST-103             |David Klein          |david@example.com    |STANDARD             |EU-EAST              |
+|CUST-100             |Alice Schmidt        |alice@example.com    |GOLD                 |EU-WEST              |
+|CUST-101             |Bob Meier            |bob@example.com      |SILVER               |EU-CENTRAL           |
+|CUST-102             |Carol Bauer          |carol@example.com    |GOLD                 |EU-NORTH             |
+|CUST-103             |David Klein          |david@example.com    |STANDARD             |EU-EAST              |
+
+Press CTRL-C to interrupt
+--In ksqlDB, by default this runs as a push query — it'll stream all current rows then keep 
+listening for changes. Press Ctrl+C to stop after 4 profiles.           
+
+--for one-time snapshot
+ksql> select * from queryable_customer_profiles emit changes limit 2;
++---------------------+---------------------+---------------------+---------------------+---------------------+
+|CUSTOMERID           |NAME                 |EMAIL                |TIER                 |PREFERREDREGION      |
++---------------------+---------------------+---------------------+---------------------+---------------------+
+|CUST-100             |Alice Schmidt        |alice@example.com    |GOLD                 |EU-WEST              |
+|CUST-101             |Bob Meier            |bob@example.com      |SILVER               |EU-CENTRAL           |
+Limit Reached
+Query terminated
+
+--query a single key directly — this is the SQL equivalent of the Interactive Query pattern 
+SELECT * FROM queryable_customer_profiles WHERE customerId = 'CUST-100';
+
+--recreate the join in sql (vs 60-70 lines of code)
+-- 1. Declare the raw orders stream
+--    Your Java producer sends a DomainEvent wrapper, so the top-level fields are:
+--    eventId, eventType, timestamp, sourceService, payload (nested object)
+
+CREATE STREAM raw_orders (
+    eventId       VARCHAR,
+    eventType     VARCHAR,
+    timestamp     VARCHAR,
+    sourceService VARCHAR,
+    payload VARCHAR   -- treat as raw JSON string since nesting caused issues earlier
+) WITH (
+    KAFKA_TOPIC  = 'enrichment.orders.raw',
+    VALUE_FORMAT = 'JSON',
+    PARTITIONS   = 3
+);
+
+-- 2. Flatten the payload into a typed stream (equivalent to our selectKey + rekey logic)
+CREATE STREAM orders_flat AS
+SELECT
+    eventId,
+    eventType,
+    sourceService,
+    EXTRACTJSONFIELD(payload, '$.orderId')     AS orderId,
+    EXTRACTJSONFIELD(payload, '$.customerId')  AS customerId,
+    EXTRACTJSONFIELD(payload, '$.productId')   AS productId,
+    CAST(EXTRACTJSONFIELD(payload, '$.quantity')    AS INT)    AS quantity,
+    CAST(EXTRACTJSONFIELD(payload, '$.totalAmount') AS DOUBLE) AS totalAmount,
+    EXTRACTJSONFIELD(payload, '$.status')      AS status
+FROM raw_orders
+PARTITION BY EXTRACTJSONFIELD(payload, '$.customerId');  -- rekey by customerId, same as .selectKey() in Java
+
+-- 3. The join — equivalent to our rawOrders.join(customerProfiles, ...) 
+CREATE STREAM enriched_orders AS
+SELECT
+    o.orderId,
+    o.customerId,
+    o.productId,
+    o.quantity,
+    o.totalAmount,
+    o.status,
+    c.name              AS customerName,
+    c.tier              AS customerTier,
+    c.preferredRegion   AS customerRegion
+FROM orders_flat o
+LEFT JOIN customer_profiles c
+    ON o.customerId = c.customerId;
+
+--run orderenrichment again >
+hdu@m1:~/kafka-examples_v3/kafka-examples$ mvn exec:java -Dexec.mainClass="com.kafka.examples.archetypes.b_streaming.OrderEnrichmentPipeline"
+
+-- 4. Verify — push query to watch enriched orders arrive in real time
+ksql> SELECT * FROM enriched_orders EMIT CHANGES;
++-----------+-----------+-----------+-----------+-----------+-----------+-----------+-----------+-----------+
+|O_CUSTOMERI|ORDERID    |PRODUCTID  |QUANTITY   |TOTALAMOUNT|STATUS     |CUSTOMERNAM|CUSTOMERTIE|CUSTOMERREG|
+|D          |           |           |           |           |           |E          |R          |ION        |
++-----------+-----------+-----------+-----------+-----------+-----------+-----------+-----------+-----------+
+|CUST-999   |ORD-003    |PROD-C7    |5          |49.95      |PENDING    |null       |null       |null       |
+|CUST-100   |ORD-001    |PROD-A1    |2          |149.99     |PENDING    |Alice Schmi|GOLD       |EU-WEST    |
+|           |           |           |           |           |           |dt         |           |           |
+|CUST-101   |ORD-002    |PROD-B3    |1          |299.0      |PENDING    |Bob Meier  |SILVER     |EU-CENTRAL |
+|CUST-102   |ORD-004    |PROD-D2    |1          |599.0      |PENDING    |Carol Bauer|GOLD       |EU-NORTH   |
+^CQuery terminated
+
+ksql>select O_CUSTOMERID,ORDERID FROM enriched_orders;
++---------------------------------------------------------+---------------------------------------------------------+
+|O_CUSTOMERID                                             |ORDERID                                                  |
++---------------------------------------------------------+---------------------------------------------------------+
+|CUST-100                                                 |ORD-001                                                  |
+|CUST-101                                                 |ORD-002                                                  |
+|CUST-102                                                 |ORD-004                                                  |
+|CUST-999                                                 |ORD-003                                                  |
+Query Completed
+Query terminated
+
+ksql>show properties;
+
+
+--describe
+ksql> DESCRIBE customer_profiles;
+
+Name                 : CUSTOMER_PROFILES
+ Field           | Type
+--------------------------------------------------
+ CUSTOMERID      | VARCHAR(STRING)  (primary key)
+ NAME            | VARCHAR(STRING)
+ EMAIL           | VARCHAR(STRING)
+ TIER            | VARCHAR(STRING)
+ PREFERREDREGION | VARCHAR(STRING)
+--------------------------------------------------
+For runtime statistics and query details run: DESCRIBE <Stream,Table> EXTENDED;
+
+ksql> DESCRIBE customer_profiles extended;
+
+Name                 : CUSTOMER_PROFILES
+Type                 : TABLE
+Timestamp field      : Not set - using <ROWTIME>
+Key format           : KAFKA
+Value format         : JSON
+Kafka topic          : enrichment.customer-profiles (partitions: 3, replication: 1)
+Statement            : CREATE TABLE CUSTOMER_PROFILES (CUSTOMERID STRING PRIMARY KEY, NAME STRING, EMAIL STRING, TIER STRING, PREFERREDREGION STRING) WITH (CLEANUP_POLICY='compact', KAFKA_TOPIC='enrichment.customer-profiles', KEY_FORMAT='KAFKA', PARTITIONS=3, VALUE_FORMAT='JSON');
+
+ Field           | Type
+--------------------------------------------------
+ CUSTOMERID      | VARCHAR(STRING)  (primary key)
+ NAME            | VARCHAR(STRING)
+ EMAIL           | VARCHAR(STRING)
+ TIER            | VARCHAR(STRING)
+ PREFERREDREGION | VARCHAR(STRING)
+--------------------------------------------------
+
+Sources that have a DROP constraint on this source
+--------------------------------------------------
+QUERYABLE_CUSTOMER_PROFILES
+ENRICHED_ORDERS
+
+Queries that read from this TABLE
+-----------------------------------
+CSAS_ENRICHED_ORDERS_9 (RUNNING) : CREATE STREAM ENRICHED_ORDERS WITH (CLEANUP_POLICY='delete', KAFKA_TOPIC='ENRICHED_ORDERS', PARTITIONS=3, REPLICAS=1, RETENTION_MS=604800000) AS SELECT   O.ORDERID ORDERID,   O.CUSTOMERID O_CUSTOMERID,   O.PRODUCTID PRODUCTID,   O.QUANTITY QUANTITY,   O.TOTALAMOUNT TOTALAMOUNT,   O.STATUS STATUS,   C.NAME CUSTOMERNAME,   C.TIER CUSTOMERTIER,   C.PREFERREDREGION CUSTOMERREGION FROM ORDERS_FLAT O LEFT OUTER JOIN CUSTOMER_PROFILES C ON ((O.CUSTOMERID = C.CUSTOMERID)) EMIT CHANGES;
+CTAS_QUERYABLE_CUSTOMER_PROFILES_3 (RUNNING) : CREATE TABLE QUERYABLE_CUSTOMER_PROFILES WITH (CLEANUP_POLICY='compact', KAFKA_TOPIC='QUERYABLE_CUSTOMER_PROFILES', PARTITIONS=3, REPLICAS=1, RETENTION_MS=604800000) AS SELECT * FROM CUSTOMER_PROFILES CUSTOMER_PROFILES EMIT CHANGES;
+
+For query topology and execution plan please run: EXPLAIN <QueryId>
+
+Runtime statistics by host
+-------------------------
+ Host    | Metric                    | Value      | Last Message
+-----------------------------------------------------------------------------
+ m1:8088 | consumer-messages-per-sec |          0 | 2026-06-25T01:35:36.877Z
+ m1:8088 | consumer-total-bytes      |       3024 | 2026-06-25T01:35:36.877Z
+ m1:8088 | consumer-total-messages   |         24 | 2026-06-25T01:35:36.877Z
+-----------------------------------------------------------------------------
+(Statistics of the local KSQL server interaction with the Kafka topic enrichment.customer-profiles)
+
 ===============================================================================
 ##2C
 mvn exec:java -Dexec.mainClass="com.kafka.examples.archetypes.c_ingestion.IngestionPipeline"
@@ -795,8 +997,284 @@ GROUP                   TOPIC                   PARTITION  CURRENT-OFFSET  LOG-E
 kstream-operations-demo streams.sensor.readings 0          2               2               0               kstream-operations-demo-7a2aa501-14d7-4c3e-a3f0-201ebb7feb3f-StreamThread-1-consumer-a50a5c1b-3aa5-4bdc-a75a-ae5477d0fea3 /127.0.0.1      kstream-operations-demo-7a2aa501-14d7-4c3e-a3f0-201ebb7feb3f-StreamThread-1-consumer
 kstream-operations-demo streams.sensor.readings 1          4               4               0               kstream-operations-demo-7a2aa501-14d7-4c3e-a3f0-201ebb7feb3f-StreamThread-1-consumer-a50a5c1b-3aa5-4bdc-a75a-ae5477d0fea3 /127.0.0.1      kstream-operations-demo-7a2aa501-14d7-4c3e-a3f0-201ebb7feb3f-StreamThread-1-consumer
 kstream-operations-demo streams.sensor.readings 2          4               4               0               kstream-operations-demo-7a2aa501-14d7-4c3e-a3f0-201ebb7feb3f-StreamThread-1-consumer-a50a5c1b-3aa5-4bdc-a75a-ae5477d0fea3 /127.0.0.1      kstream-operations-demo-7a2aa501-14d7-4c3e-a3f0-201ebb7feb3f-StreamThread-1-consumer
+
+#KsqlDB & KTables
+--Recreate the source stream
+CREATE STREAM sensor_readings (
+    sensorId    VARCHAR,
+    location    VARCHAR,
+    temperature DOUBLE,
+    humidity    DOUBLE,
+    timestamp   BIGINT
+) WITH (
+    KAFKA_TOPIC  = 'streams.sensor.readings',
+    VALUE_FORMAT = 'JSON',
+    PARTITIONS   = 3
+);
+
+--filter() [Keep only hot readings]
+-- Equivalent to your hotReadings filter
+CREATE STREAM hot_readings AS
+SELECT *
+FROM sensor_readings
+WHERE temperature > 75.0
+EMIT CHANGES;
+
+--mapValues (enrich with severity)
+-- Equivalent to your mapValues() enrichedAlerts
+CREATE STREAM sensor_alerts AS
+SELECT
+    sensorId,
+    location,
+    temperature,
+    humidity,
+    CASE
+        WHEN temperature > 90.0 THEN 'CRITICAL'
+        WHEN temperature > 75.0 THEN 'WARNING'
+        ELSE 'NORMAL'
+    END AS severity,
+    CONCAT('Temperature threshold exceeded: ',
+           CAST(temperature AS VARCHAR), '°C') AS message
+FROM sensor_readings
+WHERE temperature > 75.0
+EMIT CHANGES;
+
+--branch() [critical and warning]\-- Equivalent to your split().branch() — just two derived streams
+
+CREATE STREAM critical_alerts AS
+SELECT * FROM sensor_alerts
+WHERE severity = 'CRITICAL'
+EMIT CHANGES;
+
+CREATE STREAM warning_alerts AS
+SELECT * FROM sensor_alerts
+WHERE severity = 'WARNING'
+EMIT CHANGES;
+
+--selectKey() — rekey by location (high humidity)
+CREATE STREAM humidity_alerts
+    WITH (KAFKA_TOPIC = 'streams.sensor.humidity-alerts')
+AS
+SELECT *
+FROM sensor_readings
+WHERE humidity > 80.0
+PARTITION BY location   -- this is the selectKey() equivalent
+EMIT CHANGES;
+
+--flatMap() — one reading → multiple alert rows
+--ksqlDB doesn't have a direct flatMap(), we could use UNION ALL (may be version specific)
+
+#CREATE STREAM multi_metric_alerts AS
+#    SELECT
+#        CONCAT(sensorId, '-TEMP') AS alertKey,
+#        'TEMP_ALERT'              AS alertType,
+#        CAST(temperature AS VARCHAR) AS value
+#    FROM sensor_readings
+#    WHERE temperature > 75.0
+#UNION ALL
+#    SELECT
+#        CONCAT(sensorId, '-HUM') AS alertKey,
+#        'HUMIDITY_ALERT'         AS alertType,
+#        CAST(humidity AS VARCHAR) AS value
+#    FROM sensor_readings
+#    WHERE humidity > 80.0
+#EMIT CHANGES;
+
+-- So, Instead of UNION ALL, create a new stream that reads from
+-- both critical_alerts and warning_alerts topics directly
+CREATE STREAM all_alerts (
+    sensorId    VARCHAR,
+    location    VARCHAR,
+    temperature DOUBLE,
+    humidity    DOUBLE,
+    severity    VARCHAR,
+    message     VARCHAR
+) WITH (
+    KAFKA_TOPIC  = 'CRITICAL_ALERTS',
+    VALUE_FORMAT = 'JSON'
+);
+
+
+--KTable operations — things Java didn't do but ksqlDB makes easy
+#Aggregation — count alerts per location (stateful, like a KTable)
+CREATE TABLE alert_counts_by_location AS
+SELECT
+    location,
+    COUNT(*)                                              AS total_alerts,
+    SUM(CASE WHEN severity = 'CRITICAL' THEN 1 ELSE 0 END) AS critical_count,
+    SUM(CASE WHEN severity = 'WARNING'  THEN 1 ELSE 0 END) AS warning_count,
+    AVG(temperature)                                      AS avg_temp,
+    MAX(temperature)                                      AS max_temp
+FROM sensor_alerts
+GROUP BY location
+EMIT CHANGES;
+
+#Windowed aggregation — alerts per location per 5-minute tumbling window
+CREATE TABLE alerts_per_window AS
+SELECT
+    location,
+    WINDOWSTART                  AS window_start,
+    WINDOWEND                    AS window_end,
+    COUNT(*)                     AS alert_count,
+    MAX(temperature)             AS peak_temp
+FROM sensor_alerts
+WINDOW TUMBLING (SIZE 5 MINUTES)
+GROUP BY location
+EMIT CHANGES;
+
+#Hopping window — rolling 10-min window, updated every 2 min
+CREATE TABLE rolling_avg_temp AS
+SELECT
+    location,
+    AVG(temperature) AS avg_temp,
+    COUNT(*)         AS reading_count
+FROM sensor_readings
+WINDOW HOPPING (SIZE 10 MINUTES, ADVANCE BY 2 MINUTES)
+GROUP BY location
+EMIT CHANGES;
+
+#Session window — detect bursts of activity per sensor
+CREATE TABLE sensor_sessions AS
+SELECT
+    sensorId,
+    COUNT(*)         AS readings_in_session,
+    MAX(temperature) AS session_peak_temp,
+    MIN(temperature) AS session_min_temp
+FROM sensor_readings
+WINDOW SESSION (30 SECONDS)
+GROUP BY sensorId
+EMIT CHANGES;
+
+#peek() — just add a SELECT for debugging
+-- Non-destructive observation — equivalent to peek()
+SELECT sensorId, temperature, severity
+FROM sensor_alerts
+EMIT CHANGES;
+
+#merge() — union two streams
+-- Equivalent to criticalAlerts.merge(warningAlerts)
+-- This IS your merge() — sensor_alerts has both CRITICAL and WARNING
+-- critical_alerts and warning_alerts are just filtered views of it
+SELECT * FROM sensor_alerts EMIT CHANGES;
+
+Querying:
+> query the materialized tables (pull query, instant snapshot)
+-- Tables are queryable directly (they hold state)
+SELECT * FROM alert_counts_by_location WHERE location = 'FactoryFloor-B';
+
+-- Or all locations
+SELECT * FROM alert_counts_by_location;
+
+> push query then re-run your Java producer:
+-- Open this first, keep it running
+SELECT * FROM sensor_alerts EMIT CHANGES;
+
+>query windowed tables:
+-- See what's in the tumbling window table right now
+SELECT location, alert_count, peak_temp,
+       TIMESTAMPTOSTRING(WINDOWSTART, 'HH:mm:ss') AS win_start,
+       TIMESTAMPTOSTRING(WINDOWEND,   'HH:mm:ss') AS win_end
+FROM alerts_per_window;
+
+-- Session table
+SELECT sensorId, readings_in_session, session_peak_temp
+FROM sensor_sessions;
+
+-- check what data is already in a stream (set offset to earliest):
+-- Tell ksqlDB to read from the beginning of the topic
+SET 'auto.offset.reset' = 'earliest';
+
+-- Now this will show historical records too
+SELECT * FROM sensor_alerts EMIT CHANGES LIMIT 10;
+
+If no data,
+reason: ksqlDB derived streams only process data that arrives after they are created, unless the 
+source topic still has the data and we reset the offset. 
+The auto.offset.reset = earliest we set applies to new queries, not the already-created persistent streams.
+
+--chck lag
+# Run this in your terminal, not ksqlDB
+kafka-consumer-groups.sh \
+  --bootstrap-server localhost:9092 \
+  --describe \
+  --group _confluent-ksql-default_query_CSAS_SENSOR_ALERTS_15
+  
+So rerun the producer and test queries
+
+*****Golden rule for ksqlDB****
+
+So we need to : [
+1. SET 'auto.offset.reset' = 'earliest';
+2. DROP all tables and streams (bottom up)
+3. Recreate all streams and tables (top down)
+4. Run Java producer
+5. Query tables → see data ]
+
+SET 'auto.offset.reset' = 'earliest'; 
+--Always run this before creating any stream or table if you want it to process historical data. 
+Once a persistent query is created with latest, the only way to fix it is drop and recreate.
+
+-- Step 1: set offset to earliest FIRST
+SET 'auto.offset.reset' = 'earliest';
+
+-- Step 2: drop dependents first (bottom up)
+DROP TABLE alert_counts_by_location;
+DROP TABLE alerts_per_window;
+DROP TABLE rolling_avg_temp;
+DROP TABLE sensor_sessions;
+DROP STREAM critical_alerts;
+DROP STREAM warning_alerts;
+DROP STREAM sensor_alerts;
+DROP STREAM hot_readings;
+DROP STREAM humidity_alerts;
+
+-- Step 3: recreate top down — now they'll replay from offset 0
+CREATE STREAM sensor_alerts AS
+SELECT
+    sensorId, location, temperature, humidity,
+    CASE
+        WHEN temperature > 90.0 THEN 'CRITICAL'
+        WHEN temperature > 75.0 THEN 'WARNING'
+    END AS severity,
+    CONCAT('Temperature threshold exceeded: ',
+           CAST(temperature AS VARCHAR), '°C') AS message
+FROM sensor_readings
+WHERE temperature > 75.0
+EMIT CHANGES;
+
+CREATE TABLE alert_counts_by_location AS
+SELECT
+    location,
+    COUNT(*) AS total_alerts,
+    SUM(CASE WHEN severity = 'CRITICAL' THEN 1 ELSE 0 END) AS critical_count,
+    SUM(CASE WHEN severity = 'WARNING'  THEN 1 ELSE 0 END) AS warning_count,
+    AVG(temperature) AS avg_temp,
+    MAX(temperature) AS max_temp
+FROM sensor_alerts
+GROUP BY location
+EMIT CHANGES;
+
+--Then query
+SELECT * FROM alert_counts_by_location;
+
+Remember: Kafka is not a queue. Data is not destroyed after being consumed. 
+Multiple consumers can read the same data independently.
+
+Java KStreamOperations reads msg0-msg6  ← doesn't affect ksqlDB
+ksqlDB sensor_alerts also reads msg0-msg6  ← independent consumer
+
+Summary:
+ksqlDB sees data IF:
+  Data arrived AFTER the stream was created (latest mode)
+  Data is still within retention window (default 7 days)
+  auto.offset.reset = earliest was set before stream creation
+  New data arrives after creation (always works regardless)
+
+ksqlDB misses data IF:
+  Stream created AFTER data was produced AND offset = latest
+  Data expired past retention window (7+ days old)
 ---------------------
-#3.2 — all three join types
+#3.2 — All three join types
 
 Terminal 1:
 mvn exec:java -Dexec.mainClass="com.kafka.examples.streams.joins.JoinExamples"
@@ -892,6 +1370,159 @@ KStream-KTable       → latest state lookup, same key, no window
 KStream-GlobalKTable → lookup by any field, no repartition, small tables only
 KStream-KStream      → correlate two event streams, requires time window
 
+##ksqlDB Equivalents
+Setup — create all source streams and tables
+SET 'auto.offset.reset' = 'earliest';
+
+-- Click events stream
+CREATE STREAM clicks (
+    userId  VARCHAR,
+    page    VARCHAR,
+    region  VARCHAR,
+    ts      BIGINT
+) WITH (
+    KAFKA_TOPIC  = 'joins.click-events',
+    VALUE_FORMAT = 'JSON',
+    PARTITIONS   = 3
+);
+
+-- Purchase events stream
+CREATE STREAM purchases (
+    userId    VARCHAR,
+    productId VARCHAR,
+    amount    DOUBLE,
+    ts        BIGINT
+) WITH (
+    KAFKA_TOPIC  = 'joins.purchase-events',
+    VALUE_FORMAT = 'JSON',
+    PARTITIONS   = 3
+);
+
+-- User preferences KTable
+CREATE TABLE user_preferences (
+    userId  VARCHAR PRIMARY KEY,
+    theme   VARCHAR,
+    lang    VARCHAR,
+    region  VARCHAR
+) WITH (
+    KAFKA_TOPIC  = 'joins.user-preferences',
+    VALUE_FORMAT = 'JSON',
+    PARTITIONS   = 3
+);
+
+-- Region map (GlobalKTable equivalent — ksqlDB tables are global by default)
+CREATE TABLE region_map (
+    code     VARCHAR PRIMARY KEY,
+    name     VARCHAR,
+    currency VARCHAR,
+    tz       VARCHAR
+) WITH (
+    KAFKA_TOPIC  = 'joins.region-map',
+    VALUE_FORMAT = 'JSON',
+    PARTITIONS   = 3
+);
+
+--JOIN 1 — KStream-KStream Windowed Inner Join
+-- Equivalent to clickStream.join(purchaseStream, joiner, JoinWindows.ofTimeDifference(5 min))
+CREATE STREAM conversions AS
+SELECT
+    c.userId                        AS userId,
+    c.page                          AS clickedPage,
+    p.productId                     AS purchasedProduct,
+    p.amount                        AS purchaseAmount,
+    'CONVERSION'                    AS eventType,
+    (p.ts - c.ts)                   AS msToConvert
+FROM clicks c
+INNER JOIN purchases p
+    WITHIN 5 MINUTES                -- this is the JoinWindows equivalent
+    GRACE PERIOD 30 SECONDS         -- allow late arrivals
+    ON c.userId = p.userId
+EMIT CHANGES;
+
+-- Verify: only U-001 and U-003 should appear
+SELECT userId, clickedPage, purchasedProduct, purchaseAmount
+FROM conversions
+EMIT CHANGES LIMIT 2;
+
+--JOIN 2 — KStream-KTable Left Join
+-- Equivalent to clickStream.leftJoin(userPreferences, joiner)
+CREATE STREAM enriched_clicks AS
+SELECT
+    c.userId                                            AS userId,
+    c.page                                              AS page,
+    c.region                                            AS region,
+    COALESCE(u.theme,  'default')                       AS theme,
+    COALESCE(u.lang,   'en')                            AS lang,
+    'ENRICHED_CLICK'                                    AS eventType
+FROM clicks c
+LEFT JOIN user_preferences u
+    ON c.userId = u.userId          -- no WITHIN needed, KTable is non-windowed
+EMIT CHANGES;
+
+-- Verify: U-004 should appear with theme='default' (no matching preference)
+SELECT userId, page, theme, lang
+FROM enriched_clicks
+EMIT CHANGES LIMIT 4;
+
+--JOIN 3 — GlobalKTable equivalent (region enrichment)
+-- In ksqlDB all TABLEs behave like GlobalKTable — fully replicated
+-- The trick here is joining on a field INSIDE the value (region), not the stream key
+-- ksqlDB handles this naturally since you just reference the column directly
+
+CREATE STREAM region_enriched_clicks AS
+SELECT
+    c.userId                        AS userId,
+    c.page                          AS page,
+    c.region                        AS regionCode,
+    r.name                          AS regionName,
+    r.currency                      AS currency,
+    r.tz                            AS timezone,
+    'REGION_ENRICHED'               AS eventType
+FROM clicks c
+LEFT JOIN region_map r
+    ON c.region = r.code            -- joining on value field, not stream key
+                                    -- this is what GlobalKTable enables in Java
+                                    -- ksqlDB does it naturally
+EMIT CHANGES;
+
+-- Verify: EU clicks get EUR/CET, US clicks get USD/EST
+SELECT userId, page, regionName, currency, timezone
+FROM region_enriched_clicks
+EMIT CHANGES LIMIT 4;
+
+--chain all three joins together
+-- One query that does everything: conversion check + prefs + region
+-- equivalent to running all three topologies simultaneously
+CREATE STREAM fully_enriched_conversions AS
+SELECT
+    c.userId                        AS userId,
+    c.page                          AS clickedPage,
+    p.productId                     AS purchasedProduct,
+    p.amount                        AS amount,
+    COALESCE(u.theme,  'default')   AS userTheme,
+    COALESCE(u.lang,   'en')        AS userLang,
+    c.region                        AS regionCode,    -- it's the join key
+    r.name                          AS regionName,
+    r.currency                      AS currency
+FROM clicks c
+INNER JOIN purchases p
+    WITHIN 5 MINUTES
+    ON c.userId = p.userId
+LEFT JOIN user_preferences u
+    ON c.userId = u.userId
+LEFT JOIN region_map r
+    ON c.region = r.code
+EMIT CHANGES;
+
+--In ksqlDB every stream has an implicit key column. When you join on a non-key field like 
+c.region, ksqlDB needs that field explicitly in the projection to wire up the output 
+schema correctly — otherwise it can't figure out what the new stream's key should be.
+
+ksql> select * from fully_enriched_conversions;
+
+--The biggest simplification is the ValueJoiner — in Java you manually construct JSON strings 
+with String.format(...). In ksqlDB you just SELECT the columns you want and it handles 
+the output format automatically.
 -------------------------------------------
 #3.3 — Windowing - This one has deliberate timing gaps so it takes about 45 seconds to run
 
@@ -1009,6 +1640,125 @@ Window size was variable — determined by activity, not a fixed clock
 
 The suppress() effect — notice tumbling windows only emitted once per window with the final count, not an intermediate update for every click. 
 Without suppress() you'd see a count of 1, then 2, then 3 as each click arrived. With it you only see the final 3 when the window closes.
+
+##ksqlDB Setup
+SET 'auto.offset.reset' = 'earliest';
+
+-- Base stream from the windowing topic
+CREATE STREAM click_events (
+    userId  VARCHAR,
+    page    VARCHAR,
+    ts      BIGINT
+) WITH (
+    KAFKA_TOPIC  = 'windowing.click-events',
+    VALUE_FORMAT = 'JSON',
+    PARTITIONS   = 3
+);
+
+--tumbling window
+-- Equivalent to TimeWindows.ofSizeWithNoGrace(Duration.ofSeconds(10))
+-- + suppress(untilWindowCloses)
+CREATE TABLE tumbling_click_counts AS
+SELECT
+    userId,
+    COUNT(*)                                            AS click_count,
+    WINDOWSTART                                         AS window_start,
+    WINDOWEND                                           AS window_end,
+    TIMESTAMPTOSTRING(WINDOWSTART, 'HH:mm:ss')         AS win_start_fmt,
+    TIMESTAMPTOSTRING(WINDOWEND,   'HH:mm:ss')         AS win_end_fmt
+FROM click_events
+WINDOW TUMBLING (
+    SIZE 10 SECONDS,
+    RETENTION 1 HOUR        -- how long to keep old windows in state store
+)
+GROUP BY userId
+EMIT FINAL;                 -- equivalent to suppress(untilWindowCloses)
+                            -- only emits when window closes, not on every record
+                            
+-- Validate: query after running the producer
+-- Should show Phase1 clicks in window 1, Phase3 clicks in window 2
+SELECT
+    userId,
+    click_count,
+    win_start_fmt,
+    win_end_fmt
+FROM tumbling_click_counts;
+
+--hopping window
+-- Equivalent to TimeWindows.ofSizeWithNoGrace(30s).advanceBy(10s)
+-- No suppress → emits partial counts on every record (EMIT CHANGES)
+--retention must be bigger than window_size + grace_period.
+-- Hopping: explicitly set grace period to 0 so retention just needs to beat window size
+CREATE TABLE hopping_click_counts AS
+SELECT
+    userId,
+    COUNT(*)                                    AS click_count,
+    WINDOWSTART                                 AS window_start,
+    WINDOWEND                                   AS window_end,
+    TIMESTAMPTOSTRING(WINDOWSTART, 'HH:mm:ss') AS win_start_fmt,
+    TIMESTAMPTOSTRING(WINDOWEND,   'HH:mm:ss') AS win_end_fmt
+FROM click_events
+WINDOW HOPPING (SIZE 30 SECONDS, ADVANCE BY 10 SECONDS)
+GROUP BY userId
+EMIT CHANGES;
+
+-- Validate: each click appears in multiple windows
+-- U-001 with 3 clicks in Phase1 should appear in windows [0-30],[10-40],[20-50]
+SELECT
+    userId,
+    click_count,
+    win_start_fmt,
+    win_end_fmt
+FROM hopping_click_counts
+WHERE userId = 'U-001';
+
+--Session window
+-- Equivalent to SessionWindows.ofInactivityGapWithNoGrace(Duration.ofSeconds(15))
+-- Session: same fix
+CREATE TABLE session_click_counts AS
+SELECT
+    userId,
+    COUNT(*)                                    AS pages_viewed,
+    WINDOWSTART                                 AS session_start,
+    WINDOWEND                                   AS session_end,
+    TIMESTAMPTOSTRING(WINDOWSTART, 'HH:mm:ss') AS session_start_fmt,
+    TIMESTAMPTOSTRING(WINDOWEND,   'HH:mm:ss') AS session_end_fmt,
+    (WINDOWEND - WINDOWSTART) / 1000            AS session_duration_secs
+FROM click_events
+WINDOW SESSION (15 SECONDS)
+GROUP BY userId
+EMIT CHANGES;
+
+-- Validate: Phase1+Phase3 should be ONE session (12s pause < 15s gap)
+-- Phase5 should be a NEW session (20s pause > 15s gap)
+SELECT
+    userId,
+    pages_viewed,
+    session_start_fmt,
+    session_end_fmt,
+    session_duration_secs
+FROM session_click_counts
+WHERE pages_viewed > 0;
+
+--compare all three windows side by side
+-- Run after producer completes all 5 phases
+-- Shows how the same clicks look different across window types
+-- Query each table individually
+SELECT 'TUMBLING' AS window_type, userId, click_count, win_start_fmt, win_end_fmt
+FROM tumbling_click_counts;
+
+SELECT 'HOPPING' AS window_type, userId, click_count, win_start_fmt, win_end_fmt
+FROM hopping_click_counts;
+
+SELECT 'SESSION' AS window_type, userId, pages_viewed AS click_count,
+       session_start_fmt AS win_start_fmt, session_end_fmt AS win_end_fmt
+FROM session_click_counts
+WHERE pages_viewed > 0;
+
+Note**
+The biggest win is EMIT FINAL — in Java you need the verbose 
+suppress(Suppressed.untilWindowCloses(BufferConfig.unbounded())) boilerplate. 
+ksqlDB makes it a two-word clause.
 
 --------------------------------
 #3.4 State Stores - 
@@ -1261,6 +2011,131 @@ touching any external database.
 
 In terminal 1:
 notice: PRICE DROP ALERT: BMW dropped -7.xx% (prev=... now=...)
+
+#KsqlDB
+SET 'auto.offset.reset' = 'earliest';
+
+CREATE STREAM stock_prices (
+    ticker        VARCHAR,
+    price         DOUBLE,
+    previousClose DOUBLE,
+    ts            BIGINT
+) WITH (
+    KAFKA_TOPIC  = 'streams.stock.prices',
+    VALUE_FORMAT = 'JSON',
+    PARTITIONS   = 3
+);
+
+#Custom Aggregation — equivalent to aggregate(initializer, aggregator, Materialized)
+-- Equivalent to the full StockStats aggregator
+-- ksqlDB maintains this as a KTable in its own RocksDB store automatically
+CREATE TABLE stock_stats AS
+SELECT
+    ticker,
+    -- equivalent to StockStats fields
+    LATEST_BY_OFFSET(price)         AS latest_price,
+    MIN(price)                      AS min_price,
+    MAX(price)                      AS max_price,
+    SUM(price)                      AS total_volume,    -- simplified like Java
+    COUNT(*)                        AS tick_count,
+    AVG(price)                      AS avg_price,
+    -- derived stats
+    MAX(price) - MIN(price)         AS price_range,
+    (MAX(price) - MIN(price))
+        / MIN(price) * 100          AS volatility_pct
+FROM stock_prices
+GROUP BY ticker
+EMIT CHANGES;
+
+-- Validate — equivalent to Interactive Query printing store contents every 5s
+SELECT
+    ticker,
+    latest_price,
+    min_price,
+    max_price,
+    tick_count,
+    ROUND(avg_price, 2)             AS avg_price,
+    ROUND(volatility_pct, 2)        AS volatility_pct
+FROM stock_stats;
+
+#Price drop alert — equivalent to prices.join(stockStats) with >5% filter
+-- Equivalent to the KStream-KTable join that checks for >5% drop
+CREATE STREAM price_drop_alerts AS
+SELECT
+    p.ticker                                                AS ticker,
+    p.price                                                 AS current_price,
+    p.previousClose                                         AS prev_close,
+    ROUND(((p.price - p.previousClose)
+        / p.previousClose * 100), 2)                        AS change_pct,
+    s.min_price                                             AS session_low,
+    s.max_price                                             AS session_high,
+    s.tick_count                                            AS ticks_seen,
+    'PRICE_DROP'                                            AS alert_type
+FROM stock_prices p
+LEFT JOIN stock_stats s
+    ON p.ticker = s.ticker
+WHERE p.previousClose > 0
+  AND ((p.price - p.previousClose) / p.previousClose * 100) < -5.0
+EMIT CHANGES;
+
+-- Validate: only BMW on round 7 should appear (injected -7% crash)
+SELECT
+    ticker,
+    current_price,
+    prev_close,
+    change_pct,
+    alert_type
+FROM price_drop_alerts
+EMIT CHANGES LIMIT 5;
+
+#Interactive Query equivalent — REST API
+In Java you query the RocksDB store directly in-process. In ksqlDB the equivalent 
+is a pull query via REST — same idea, different transport:
+
+# Equivalent to store.get("BMW") — point lookup
+curl -s -X POST http://localhost:8088/query \
+  -H "Content-Type: application/vnd.ksql.v1+json" \
+  -d '{
+    "ksql": "SELECT ticker, latest_price, min_price, max_price, tick_count FROM stock_stats WHERE ticker = '\''BMW'\'';",
+    "streamsProperties": {}
+  }' | python3 -m json.tool
+
+# Equivalent to store.all() — full scan
+curl -s -X POST http://localhost:8088/query \
+  -H "Content-Type: application/vnd.ksql.v1+json" \
+  -d '{
+    "ksql": "SELECT * FROM stock_stats;",
+    "streamsProperties": {"ksql.streams.auto.offset.reset": "earliest"}
+  }' | python3 -m json.tool
+  
+#Volatility alert
+-- Fire an alert when a ticker's price range exceeds 10% of its min
+-- This is only possible because ksqlDB maintains the running stats as a KTable
+CREATE TABLE volatility_alerts AS
+SELECT
+    ticker,
+    latest_price,
+    min_price,
+    max_price,
+    ROUND(volatility_pct, 2)    AS volatility_pct,
+    tick_count,
+    'HIGH_VOLATILITY'           AS alert_type
+FROM stock_stats
+WHERE volatility_pct > 10.0
+EMIT CHANGES;
+
+Source is STREAM  → output must be CREATE STREAM
+Source is TABLE   → output must be CREATE TABLE
+TABLE + STREAM join → output is CREATE STREAM
+
+-- Pull query — current snapshot of high volatility tickers
+SELECT ticker, latest_price, volatility_pct, alert_type
+FROM volatility_alerts;
+
+-- Push query — watch as tickers cross the 10% threshold
+SELECT ticker, latest_price, volatility_pct
+FROM volatility_alerts
+EMIT CHANGES;
 
 V1 Summary:
 Example				

@@ -1,0 +1,57 @@
+--Run this : ksql http://localhost:8088 --file cleanup.sql
+-- =====================================================
+-- FULL KSQLDB CLEANUP — run when starting fresh
+-- =====================================================
+
+-- Step 0: check what exists
+SHOW STREAMS;
+SHOW TABLES;
+SHOW QUERIES;
+
+-- Step 1: terminate any orphaned queries first
+-- (if DROP fails due to active query, find it with SHOW QUERIES and run:)
+-- TERMINATE <query_id>;
+
+-- Step 2: drop tables bottom-up (dependents first)
+DROP TABLE IF EXISTS volatility_alerts              DELETE TOPIC;
+DROP TABLE IF EXISTS price_drop_alerts              DELETE TOPIC;
+DROP TABLE IF EXISTS stock_stats                    DELETE TOPIC;
+DROP TABLE IF EXISTS alert_counts_by_location       DELETE TOPIC;
+DROP TABLE IF EXISTS alerts_per_window              DELETE TOPIC;
+DROP TABLE IF EXISTS rolling_avg_temp               DELETE TOPIC;
+DROP TABLE IF EXISTS sensor_sessions                DELETE TOPIC;
+DROP TABLE IF EXISTS hopping_click_counts           DELETE TOPIC;
+DROP TABLE IF EXISTS tumbling_click_counts          DELETE TOPIC;
+DROP TABLE IF EXISTS session_click_counts           DELETE TOPIC;
+DROP TABLE IF EXISTS queryable_customer_profiles    DELETE TOPIC;
+DROP TABLE IF EXISTS user_preferences;              -- Java-owned topic
+DROP TABLE IF EXISTS region_map;                    -- Java-owned topic
+DROP TABLE IF EXISTS customer_profiles;             -- Java-owned topic
+
+-- Step 3: drop derived streams
+DROP STREAM IF EXISTS fully_enriched_conversions    DELETE TOPIC;
+DROP STREAM IF EXISTS region_enriched_clicks        DELETE TOPIC;
+DROP STREAM IF EXISTS enriched_clicks               DELETE TOPIC;
+DROP STREAM IF EXISTS conversions                   DELETE TOPIC;
+DROP STREAM IF EXISTS multi_metric_alerts           DELETE TOPIC;
+DROP STREAM IF EXISTS all_alerts                    DELETE TOPIC;
+DROP STREAM IF EXISTS humidity_alerts               DELETE TOPIC;
+DROP STREAM IF EXISTS critical_alerts               DELETE TOPIC;
+DROP STREAM IF EXISTS warning_alerts                DELETE TOPIC;
+DROP STREAM IF EXISTS sensor_alerts                 DELETE TOPIC;
+DROP STREAM IF EXISTS hot_readings                  DELETE TOPIC;
+DROP STREAM IF EXISTS enriched_orders               DELETE TOPIC;
+DROP STREAM IF EXISTS orders_flat                   DELETE TOPIC;
+
+-- Step 4: drop base streams (Java-owned topics — NO DELETE TOPIC)
+DROP STREAM IF EXISTS click_events;
+DROP STREAM IF EXISTS clicks;
+DROP STREAM IF EXISTS purchases;
+DROP STREAM IF EXISTS sensor_readings;
+DROP STREAM IF EXISTS stock_prices;
+DROP STREAM IF EXISTS raw_orders;
+
+-- Step 5: verify clean
+SHOW STREAMS;
+SHOW TABLES;
+SHOW QUERIES;   -- should be empty
